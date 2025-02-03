@@ -2,6 +2,13 @@
   "name": "koishi-plugin-best-cave",
   "description": "最好的 cave 插件，可开关的审核系统，可引用添加，支持图文混合内容，可查阅投稿列表，完美复刻你的 .cave 体验！",
   "version": "0.0.1",
+  "contributors": [
+    "Yis_Rime <yis_rime@outlook.com>"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YisRime/koishi-plugin-best-cave.git"
+  },
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -13,7 +20,8 @@
   "keywords": [
     "chatbot",
     "koishi",
-    "plugin"
+    "plugin",
+    "cave"
   ],
   "devDependencies": {},
   "peerDependencies": {
