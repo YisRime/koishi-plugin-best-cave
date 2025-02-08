@@ -682,48 +682,26 @@ export async function handleCaveAction(
     // 修改 processAdd：将缺少媒体及文本的回复逻辑移入 processAdd，并调用 extractMediaContent 提取文本处理
     async function processAdd(): Promise<string> {
       try {
-        // 提示用户输入内容并解析媒体及文本信息
-        // 修改：先读取命令内容，再读取引用内容，最后合并
-        let originalContent = content.join(' ') || '';
-        if (session.content) {
-          originalContent = session.content;
-        }
-        if (session.quote?.content) {
-          originalContent = originalContent ? `${originalContent}\n${session.quote.content}` : session.quote.content;
+        // 1. 收集所有输入内容
+        let inputParts: string[] = [];
+
+        // 读取命令后的内容（如果有）
+        if (content.length > 0) {
+          inputParts = content;
         }
 
-        // 新增：移除命令前缀
-        const prefixes = Array.isArray(session.app.config.prefix)
-          ? session.app.config.prefix
-          : [session.app.config.prefix];
-        const nicknames = Array.isArray(session.app.config.nickname)
-          ? session.app.config.nickname
-          : session.app.config.nickname ? [session.app.config.nickname] : [];
-        const allTriggers = [...prefixes, ...nicknames];
-        const triggerPattern = allTriggers
-          .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-          .join('|');
-        const commandPattern = new RegExp(`^(?:${triggerPattern}).*?-a\\s*`);
-        originalContent = originalContent.replace(commandPattern, '');
-
-        // 提取原始内容
-        let { imageUrls, imageElements, videoUrls, videoElements, textParts } = await extractMediaContent(originalContent);
-
-        // 当媒体和文本均为空时，进行回复提示
-        if (textParts.length === 0 && imageUrls.length === 0 && videoUrls.length === 0) {
-          // 发送临时提示消息
+        // 如果没有任何内容，进入提示流程
+        if (!inputParts.length) {
           await sendMessage(session, 'commands.cave.add.noContent', [], true);
           const reply = await session.prompt({ timeout: 60000 });
           if (!reply || reply.trim() === "") {
             return sendMessage(session, 'commands.cave.add.operationTimeout', [], true);
           }
-          const replyResult = await extractMediaContent(reply);
-          imageUrls = replyResult.imageUrls;
-          imageElements = replyResult.imageElements;
-          videoUrls = replyResult.videoUrls;
-          videoElements = replyResult.videoElements;
-          textParts = replyResult.textParts;
+          inputParts = [reply];
         }
+
+        // 提取媒体内容
+        let { imageUrls, imageElements, videoUrls, videoElements, textParts } = await extractMediaContent(inputParts.join('\n'));
 
         // 检查配置：是否允许添加视频
         if (videoUrls.length > 0 && !config.allowVideo) {
