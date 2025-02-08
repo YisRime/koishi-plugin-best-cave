@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // 基础定义
-export const name = 'cave';
+export const name = 'best-cave';
 export const inject = ['database'];
 
 // 配置Schema
