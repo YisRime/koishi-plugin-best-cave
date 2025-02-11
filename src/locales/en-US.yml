@@ -35,6 +35,7 @@ commands:
       mediaSizeExceeded: "{0} file size exceeds limit"
       mediaFormatUnsupported: "{0} format not supported"
       videoSendFailed: "Video send failed"
+      localFileNotAllowed: "Local file path detected, cannot save"
     remove:
       noPermission: "You do not have permission to delete others' Echo Cave"
       deletePending: "Delete (Pending Audit)"

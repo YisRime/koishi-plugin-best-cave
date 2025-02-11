@@ -35,6 +35,7 @@ commands:
       mediaSizeExceeded: "{0}文件大小超过限制"
       mediaFormatUnsupported: "{0}格式不支持"
       videoSendFailed: "视频发送失败"
+      localFileNotAllowed: "检测到本地文件路径，无法保存"
     remove:
       noPermission: "你无权删除他人添加的回声洞"
       deletePending: "删除（待审核）"
