@@ -1,14 +1,15 @@
 _config:
   manager: "管理员"
-  blacklist: "黑名单（用户）"
-  whitelist: "审核白名单（用户/群组/频道）"
   number: "冷却时间（秒）"
   enableAudit: "启用审核"
+  imageMaxSize: "图片最大大小（MB）"
+  duplicateThreshold: "图片相似度阈值（0-1）"
   allowVideo: "允许视频上传"
   videoMaxSize: "视频最大大小（MB）"
-  imageMaxSize: "图片最大大小（MB）"
   enablePagination: "启用统计分页"
   itemsPerPage: "每页显示数目"
+  blacklist: "黑名单（用户）"
+  whitelist: "审核白名单（用户/群组/频道）"
 
 commands:
   cave:
@@ -59,6 +60,7 @@ commands:
       noCave: "没有回声洞"
       invalidId: "请输入有效的回声洞ID"
       notFound: "未找到该回声洞"
+      duplicateFound: "发现相似度为 {0}% 的"
     message:
       blacklisted: "你已被列入黑名单"
       managerOnly: "此操作仅限管理员可用"

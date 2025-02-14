@@ -25,6 +25,12 @@
   ],
   "devDependencies": {},
   "peerDependencies": {
-    "koishi": "^4.18.3"
+    "koishi": "^4.18.3",
+    "sharp": "^0.32.6",
+    "koishi-plugin-adapter-onebot": "^6.1.3"
+  },
+  "dependencies": {
+    "sharp": "^0.32.6",
+    "koishi-plugin-adapter-onebot": "^6.1.3"
   }
 }
