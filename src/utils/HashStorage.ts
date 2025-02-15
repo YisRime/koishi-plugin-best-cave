@@ -123,8 +123,10 @@ export class HashStorage {
           imgBuffers.map(buffer => ImageHasher.calculateHash(buffer))
         );
         this.hashes.set(caveId, hashes);
+        logger.info(`Added ${hashes.length} hashes for cave ${caveId}`);
       } else {
         this.hashes.delete(caveId);
+        logger.info(`Deleted hashes for cave ${caveId}`);
       }
       await this.saveHashes();
     } catch (error) {
@@ -360,11 +362,6 @@ export class HashStorage {
       } catch (error) {
         logger.error(`Failed to process cave ${cave.cave_id}: ${error.message}`);
       }
-    }
-
-    if (updatedCount > 0) {
-      await this.saveHashes();
-      logger.info(`Updated ${updatedCount} new hashes`);
     }
   }
 
