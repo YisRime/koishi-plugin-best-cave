@@ -22,6 +22,7 @@ export const Config: Schema<Config> = Schema.object({
   number: Schema.number().default(60),              // 冷却时间(秒)
   enableAudit: Schema.boolean().default(false),     // 启用审核
   imageMaxSize: Schema.number().default(4),         // 图片大小限制(MB)
+  enableDuplicate: Schema.boolean().default(true), // 开启查重
   duplicateThreshold: Schema.number().default(0.8), // 查重阈值(0-1)
   allowVideo: Schema.boolean().default(true),       // 允许视频
   videoMaxSize: Schema.number().default(16),        // 视频大小限制(MB)
@@ -205,7 +206,7 @@ export async function apply(ctx: Context, config: Config) {
       const hashStorage = new HashStorage(caveDir);
       await hashStorage.initialize();
 
-      // 直接删除对应的哈希，不需要更新
+      // 直接删除对应的哈希
       await hashStorage.updateCaveHash(caveId);
 
       for (const element of targetCave.elements) {
@@ -315,7 +316,7 @@ export async function apply(ctx: Context, config: Config) {
         newCave.elements.push({
           type: 'video',
           file: savedVideos[0],
-          index: Number.MAX_SAFE_INTEGER // 确保视频总是在最后
+          index: Number.MAX_SAFE_INTEGER
         });
       }
 
@@ -605,6 +606,7 @@ export interface Config {
   enablePagination: boolean;
   itemsPerPage: number;
   duplicateThreshold: number;
+  enableDuplicate: boolean;
 }
 
 // 定义数据类型接口
@@ -845,9 +847,6 @@ async function saveMedia(
   const downloadTasks = urls.map(async (url, i) => {
     const fileName = fileNames[i];
     const ext = path.extname(fileName || url) || (mediaType === 'img' ? '.png' : '.mp4');
-    const baseName = path.basename(fileName || 'media', ext).replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
-    const finalFileName = `${caveId}_${baseName}${ext}`;
-    const filePath = path.join(resourceDir, finalFileName);
 
     try {
       const response = await ctx.http(decodeURIComponent(url).replace(/&amp;/g, '&'), {
@@ -862,40 +861,68 @@ async function saveMedia(
       });
 
       if (!response.data) throw new Error('empty_response');
+      const buffer = Buffer.from(response.data);
 
       if (mediaType === 'img') {
-        const buffer = Buffer.from(response.data);
-        // 使用统一的相似度检查
-        const result = await hashStorage.findDuplicates([buffer], config.duplicateThreshold);
+        // 获取原始文件名(MD5)
+        const baseName = path.basename(fileName || 'md5', ext).replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
 
-        if (result.length > 0 && result[0] !== null) {
-          const duplicate = result[0];
-          // 直接使用0-1范围的相似度
-          const similarity = duplicate.similarity;
+        // 查找是否存在相同MD5的文件
+        const files = await fs.promises.readdir(resourceDir);
+        const duplicateFile = files.find(file => file.startsWith(baseName + '_'));
 
-          if (similarity >= config.duplicateThreshold) {
+        if (duplicateFile) {
+          const duplicateCaveId = parseInt(duplicateFile.split('_')[1]);
+          if (!isNaN(duplicateCaveId)) {
             const caveFilePath = path.join(ctx.baseDir, 'data', 'cave', 'cave.json');
             const data = await FileHandler.readJsonData<CaveObject>(caveFilePath);
-            const originalCave = data.find(item => item.cave_id === duplicate.caveId);
+            const originalCave = data.find(item => item.cave_id === duplicateCaveId);
 
             if (originalCave) {
-              // 显示百分比
-              const message = session.text('commands.cave.error.duplicateFound',
-                [(similarity * 100).toFixed(1)]);
+              const message = session.text('commands.cave.error.exactDuplicateFound');
               await session.send(message + await buildMessage(originalCave, resourceDir, session));
               throw new Error('duplicate_found');
             }
           }
         }
 
-        // 保存图片
-        await FileHandler.saveMediaFile(filePath, buffer);
-      } else {
-        // 视频直接保存
-        await FileHandler.saveMediaFile(filePath, Buffer.from(response.data));
-      }
+        // 如果启用了相似度检查，继续进行perceptual hash比较
+        if (config.enableDuplicate) {
+          const result = await hashStorage.findDuplicates([buffer], config.duplicateThreshold);
 
-      return finalFileName;
+          if (result.length > 0 && result[0] !== null) {
+            const duplicate = result[0];
+            const similarity = duplicate.similarity;
+
+            if (similarity >= config.duplicateThreshold) {
+              const caveFilePath = path.join(ctx.baseDir, 'data', 'cave', 'cave.json');
+              const data = await FileHandler.readJsonData<CaveObject>(caveFilePath);
+              const originalCave = data.find(item => item.cave_id === duplicate.caveId);
+
+              if (originalCave) {
+                const message = session.text('commands.cave.error.similarDuplicateFound',
+                  [(similarity * 100).toFixed(1)]);
+                await session.send(message + await buildMessage(originalCave, resourceDir, session));
+                throw new Error('duplicate_found');
+              }
+            }
+          }
+        }
+
+        // 使用原始文件名(MD5)作为文件名的一部分
+        const finalFileName = `${caveId}_${baseName}${ext}`;
+        const filePath = path.join(resourceDir, finalFileName);
+
+        await FileHandler.saveMediaFile(filePath, buffer);
+        return finalFileName;
+      } else {
+        // 视频文件处理保持不变
+        const baseName = path.basename(fileName || 'video', ext).replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+        const finalFileName = `${caveId}_${baseName}${ext}`;
+        const filePath = path.join(resourceDir, finalFileName);
+        await FileHandler.saveMediaFile(filePath, buffer);
+        return finalFileName;
+      }
     } catch (error) {
       if (error.message === 'duplicate_found') {
         throw error;

@@ -5,13 +5,25 @@ import { FileHandler } from './fileHandler';
 
 const logger = new Logger('idManager');
 
+/**
+ * 回声洞对象接口
+ */
 interface CaveObject {
+  /** 回声洞ID */
   cave_id: number;
+  /** 贡献者编号 */
   contributor_number: string;
 }
 
+/**
+ * 待处理回声洞对象接口
+ */
 interface PendingCave extends CaveObject {}
 
+/**
+ * ID管理器类
+ * 负责管理回声洞ID的分配、删除和统计信息
+ */
 export class IdManager {
   private deletedIds: Set<number> = new Set();
   private maxId: number = 0;
@@ -20,11 +32,21 @@ export class IdManager {
   private stats: Record<string, number[]> = {};
   private usedIds: Set<number> = new Set();
 
+  /**
+   * 初始化ID管理器
+   * @param baseDir - 基础目录路径
+   */
   constructor(baseDir: string) {
     const caveDir = path.join(baseDir, 'data', 'cave');
     this.statusFilePath = path.join(caveDir, 'status.json');
   }
 
+  /**
+   * 初始化ID管理系统
+   * @param caveFilePath - 正式回声洞数据文件路径
+   * @param pendingFilePath - 待处理回声洞数据文件路径
+   * @throws 当初始化失败时抛出错误
+   */
   async initialize(caveFilePath: string, pendingFilePath: string) {
     if (this.initialized) return;
 
@@ -101,6 +123,15 @@ export class IdManager {
     }
   }
 
+  /**
+   * 处理ID冲突
+   * @param conflicts - ID冲突映射表
+   * @param caveFilePath - 正式回声洞数据文件路径
+   * @param pendingFilePath - 待处理回声洞数据文件路径
+   * @param caveData - 正式回声洞数据
+   * @param pendingData - 待处理回声洞数据
+   * @private
+   */
   private async handleConflicts(
     conflicts: Map<number, Array<CaveObject | PendingCave>>,
     caveFilePath: string,
@@ -134,6 +165,11 @@ export class IdManager {
     }
   }
 
+  /**
+   * 获取下一个可用的ID
+   * @returns 下一个可用的ID
+   * @throws 当ID管理器未初始化时抛出错误
+   */
   getNextId(): number {
     if (!this.initialized) {
       throw new Error('IdManager not initialized');
@@ -160,6 +196,11 @@ export class IdManager {
     return nextId;
   }
 
+  /**
+   * 标记ID为已删除状态
+   * @param id - 要标记为删除的ID
+   * @throws 当ID管理器未初始化时抛出错误
+   */
   async markDeleted(id: number) {
     if (!this.initialized) {
       throw new Error('IdManager not initialized');
@@ -176,6 +217,11 @@ export class IdManager {
     await this.saveStatus();
   }
 
+  /**
+   * 添加贡献统计
+   * @param contributorNumber - 贡献者编号
+   * @param caveId - 回声洞ID
+   */
   async addStat(contributorNumber: string, caveId: number) {
     if (contributorNumber === '10000') return;
     if (!this.stats[contributorNumber]) {
@@ -185,6 +231,11 @@ export class IdManager {
     await this.saveStatus();
   }
 
+  /**
+   * 移除贡献统计
+   * @param contributorNumber - 贡献者编号
+   * @param caveId - 回声洞ID
+   */
   async removeStat(contributorNumber: string, caveId: number) {
     if (this.stats[contributorNumber]) {
       this.stats[contributorNumber] = this.stats[contributorNumber].filter(id => id !== caveId);
@@ -195,10 +246,19 @@ export class IdManager {
     }
   }
 
+  /**
+   * 获取所有贡献统计信息
+   * @returns 贡献者编号到回声洞ID列表的映射
+   */
   getStats(): Record<string, number[]> {
     return this.stats;
   }
 
+  /**
+   * 保存当前状态到文件
+   * @private
+   * @throws 当保存失败时抛出错误
+   */
   private async saveStatus(): Promise<void> {
     try {
       const status = {

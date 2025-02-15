@@ -3,8 +3,9 @@ _config:
   number: "Cooldown time (seconds)"
   enableAudit: "Enable moderation"
   imageMaxSize: "Maximum image size (MB)"
+  enableDuplicate: "Enable image duplicate check"
   duplicateThreshold: "Image similarity threshold (0-1)"
-  allowVideo: "Allow video uploads"
+  allowVideo: "Allow video upload"
   videoMaxSize: "Maximum video size (MB)"
   enablePagination: "Enable statistics pagination"
   itemsPerPage: "Items per page"
@@ -14,57 +15,58 @@ _config:
 commands:
   cave:
     description: "Echo Cave"
-    usage: "Support adding, drawing, viewing, and managing echo cave entries"
+    usage: "Support adding, drawing, viewing, and managing echo caves"
     examples: |-
-      Use cave to randomly draw an entry
-      Use -a to add directly or by reference
-      Use -g to view specific entry
-      Use -r to delete specific entry
+      Use cave to randomly draw an echo
+      Use -a to add directly or add by reference
+      Use -g to view specific echo
+      Use -r to delete specific echo
     options:
-      a: "Add entry"
-      g: "View entry"
-      r: "Delete entry"
-      p: "Approve submission (batch)"
-      d: "Reject submission (batch)"
-      l: "Check submission statistics"
+      a: "Add echo"
+      g: "View echo"
+      r: "Delete echo"
+      p: "Approve moderation (batch)"
+      d: "Reject moderation (batch)"
+      l: "Query submission statistics"
     add:
       noContent: "Please send content within one minute"
       operationTimeout: "Operation timeout, addition cancelled"
-      videoDisabled: "Video uploads are not allowed"
+      videoDisabled: "Video upload not allowed"
       submitPending: "Submission successful, ID is ({0})"
       addSuccess: "Added successfully, ID is ({0})"
       mediaSizeExceeded: "{0} file size exceeds limit"
       localFileNotAllowed: "Local file path detected, cannot save"
     remove:
-      noPermission: "You don't have permission to delete others' entries"
-      deletePending: "Delete (pending)"
+      noPermission: "You don't have permission to delete others' echos"
+      deletePending: "Delete (pending review)"
       deleted: "Deleted"
     list:
       pageInfo: "Page {0} / {1}"
-      header: "Currently there are {0} entries:"
-      totalItems: "User {0} has submitted {1} entries:"
+      header: "Currently there are {0} echos:"
+      totalItems: "User {0} has submitted {1} items:"
       idsLine: "{0}"
     audit:
-      noPending: "No pending entries"
-      pendingNotFound: "Pending entry not found"
-      pendingResult: "{0}, {1} pending entries remaining: [{2}]"
+      noPending: "No pending echos for review"
+      pendingNotFound: "Pending echo not found"
+      pendingResult: "{0}, {1} pending echos remaining: [{2}]"
       auditPassed: "Approved"
       auditRejected: "Rejected"
-      batchAuditResult: "{0} {1}/{2} entries"
-      title: "Pending entries:"
+      batchAuditResult: "{0} {1}/{2} echos"
+      title: "Pending echos:"
       from: "Submitted by:"
       sendFailed: "Failed to send moderation message, cannot contact administrator {0}"
     error:
-      noContent: "Entry content is empty"
-      getCave: "Failed to get entry"
-      noCave: "No entries available"
-      invalidId: "Please enter a valid entry ID"
-      notFound: "Entry not found"
-      duplicateFound: "Found duplicate image with similarity of {0}%"
+      noContent: "Echo content is empty"
+      getCave: "Failed to get echo"
+      noCave: "No echos available"
+      invalidId: "Please enter a valid echo ID"
+      notFound: "Echo not found"
+      exactDuplicateFound: "Found exactly identical"
+      similarDuplicateFound: "Found {0}% similar"
     message:
       blacklisted: "You have been blacklisted"
-      managerOnly: "This operation is for administrators only"
-      cooldown: "Group chat cooldown... Please try again in {0} seconds"
+      managerOnly: "This operation is limited to administrators only"
+      cooldown: "Group chat cooling down... Please try again in {0} seconds"
       caveTitle: "Echo Cave —— ({0})"
       contributorSuffix: "—— {0}"
       mediaSizeExceeded: "{0} file size exceeds limit"

@@ -11,7 +11,12 @@ export class FileHandler {
   private static readonly RETRY_DELAY = 1000;
   private static readonly CONCURRENCY_LIMIT = 5;
 
-  // 并发控制
+  /**
+   * 并发控制
+   * @param operation 要执行的操作
+   * @param limit 并发限制
+   * @returns 操作结果
+   */
   private static async withConcurrencyLimit<T>(
     operation: () => Promise<T>,
     limit = this.CONCURRENCY_LIMIT
@@ -22,7 +27,12 @@ export class FileHandler {
     return operation();
   }
 
-  // 文件操作包装器
+  /**
+   * 文件操作包装器
+   * @param filePath 文件路径
+   * @param operation 要执行的操作
+   * @returns 操作结果
+   */
   private static async withFileOp<T>(
     filePath: string,
     operation: () => Promise<T>
@@ -53,7 +63,11 @@ export class FileHandler {
     }
   }
 
-  // 事务处理
+  /**
+   * 事务处理
+   * @param operations 要执行的操作数组
+   * @returns 操作结果数组
+   */
   static async withTransaction<T>(
     operations: Array<{
       filePath: string;
@@ -88,7 +102,11 @@ export class FileHandler {
     }
   }
 
-  // JSON读写
+  /**
+   * 读取 JSON 数据
+   * @param filePath 文件路径
+   * @returns JSON 数据
+   */
   static async readJsonData<T>(filePath: string): Promise<T[]> {
     return this.withFileOp(filePath, async () => {
       try {
@@ -100,6 +118,11 @@ export class FileHandler {
     });
   }
 
+  /**
+   * 写入 JSON 数据
+   * @param filePath 文件路径
+   * @param data 要写入的数据
+   */
   static async writeJsonData<T>(filePath: string, data: T[]): Promise<void> {
     const tmpPath = `${filePath}.tmp`;
     await this.withFileOp(filePath, async () => {
@@ -108,7 +131,10 @@ export class FileHandler {
     });
   }
 
-  // 目录和文件操作
+  /**
+   * 确保目录存在
+   * @param dir 目录路径
+   */
   static async ensureDirectory(dir: string): Promise<void> {
     await this.withConcurrencyLimit(async () => {
       if (!fs.existsSync(dir)) {
@@ -117,6 +143,10 @@ export class FileHandler {
     });
   }
 
+  /**
+   * 确保 JSON 文件存在
+   * @param filePath 文件路径
+   */
   static async ensureJsonFile(filePath: string): Promise<void> {
     await this.withFileOp(filePath, async () => {
       if (!fs.existsSync(filePath)) {
@@ -125,7 +155,11 @@ export class FileHandler {
     });
   }
 
-  // 媒体文件操作
+  /**
+   * 保存媒体文件
+   * @param filePath 文件路径
+   * @param data 文件数据
+   */
   static async saveMediaFile(
     filePath: string,
     data: Buffer | string
@@ -139,6 +173,10 @@ export class FileHandler {
     });
   }
 
+  /**
+   * 删除媒体文件
+   * @param filePath 文件路径
+   */
   static async deleteMediaFile(filePath: string): Promise<void> {
     await this.withFileOp(filePath, async () => {
       if (fs.existsSync(filePath)) {

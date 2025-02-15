@@ -8,32 +8,46 @@ import { promisify } from 'util';
 const logger = new Logger('HashStorage');
 const readFileAsync = promisify(fs.readFile);
 
+/**
+ * 存储图片哈希值的数据结构
+ */
 interface HashData {
-  // 存储图片哈希值的记录，key为洞穴ID，value为哈希值数组
+  /** 存储图片哈希值的记录，key为回声洞ID，value为哈希值数组 */
   hashes: Record<string, string[]>;
-  // 最后更新时间
+  /** 最后更新时间 */
   lastUpdated?: string;
 }
 
+/**
+ * 哈希存储状态信息
+ */
 interface HashStatus {
-  // 最后更新时间戳
+  /** 最后更新时间戳 */
   lastUpdated: string;
-  // 所有洞穴的哈希值条目
+  /** 所有回声洞的哈希值条目 */
   entries: Array<{ caveId: number; hashes: string[] }>;
 }
 
+/**
+ * 图片哈希值存储管理类
+ * 负责管理和维护回声洞图片的哈希值
+ */
 export class HashStorage {
   // 哈希数据文件名
   private static readonly HASH_FILE = 'hash.json';
-  // 洞穴数据文件名
+  // 回声洞数据文件名
   private static readonly CAVE_FILE = 'cave.json';
   // 批处理大小
   private static readonly BATCH_SIZE = 50;
-  // 存储洞穴ID到图片哈希值的映射
+  // 存储回声洞ID到图片哈希值的映射
   private hashes = new Map<number, string[]>();
   // 初始化状态标志
   private initialized = false;
 
+  /**
+   * 初始化HashStorage实例
+   * @param caveDir 回声洞数据目录路径
+   */
   constructor(private readonly caveDir: string) {}
 
   private get filePath() {
@@ -48,6 +62,11 @@ export class HashStorage {
     return path.join(this.caveDir, HashStorage.CAVE_FILE);
   }
 
+  /**
+   * 初始化哈希存储
+   * 读取现有哈希数据或重新构建哈希值
+   * @throws 初始化失败时抛出错误
+   */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
@@ -74,6 +93,10 @@ export class HashStorage {
     }
   }
 
+  /**
+   * 获取当前哈希存储状态
+   * @returns 包含最后更新时间和所有条目的状态对象
+   */
   async getStatus(): Promise<HashStatus> {
     if (!this.initialized) await this.initialize();
 
@@ -86,6 +109,11 @@ export class HashStorage {
     };
   }
 
+  /**
+   * 更新指定回声洞的图片哈希值
+   * @param caveId 回声洞ID
+   * @param imgBuffers 图片buffer数组
+   */
   async updateCaveHash(caveId: number, imgBuffers?: Buffer[]): Promise<void> {
     if (!this.initialized) await this.initialize();
 
@@ -104,6 +132,10 @@ export class HashStorage {
     }
   }
 
+  /**
+   * 更新所有回声洞的哈希值
+   * @param isInitialBuild 是否为初始构建
+   */
   async updateAllCaves(isInitialBuild: boolean = false): Promise<void> {
     if (!this.initialized && !isInitialBuild) {
       await this.initialize();
@@ -162,6 +194,12 @@ export class HashStorage {
     }
   }
 
+  /**
+   * 查找重复的图片
+   * @param imgBuffers 待查找的图片buffer数组
+   * @param threshold 相似度阈值
+   * @returns 匹配结果数组，包含索引、回声洞ID和相似度
+   */
   async findDuplicates(imgBuffers: Buffer[], threshold: number): Promise<Array<{
     index: number;
     caveId: number;
@@ -209,6 +247,11 @@ export class HashStorage {
     );
   }
 
+  /**
+   * 加载回声洞数据
+   * @returns 回声洞数据数组
+   * @private
+   */
   private async loadCaveData(): Promise<Array<{
     cave_id: number;
     elements: Array<{ type: string; file?: string }>;
@@ -220,6 +263,10 @@ export class HashStorage {
     return Array.isArray(data) ? data.flat() : [];
   }
 
+  /**
+   * 保存哈希数据到文件
+   * @private
+   */
   private async saveHashes(): Promise<void> {
     const data: HashData = {
       hashes: Object.fromEntries(this.hashes),
@@ -228,6 +275,10 @@ export class HashStorage {
     await FileHandler.writeJsonData(this.filePath, [data]);
   }
 
+  /**
+   * 构建初始哈希数据
+   * @private
+   */
   private async buildInitialHashes(): Promise<void> {
     const caveData = await this.loadCaveData();
     let processedImageCount = 0;
@@ -275,6 +326,10 @@ export class HashStorage {
     logger.success(`Build completed. Processed ${processedImageCount}/${totalImages} images`);
   }
 
+  /**
+   * 更新缺失的哈希值
+   * @private
+   */
   private async updateMissingHashes(): Promise<void> {
     const caveData = await this.loadCaveData();
     let updatedCount = 0;
@@ -313,6 +368,13 @@ export class HashStorage {
     }
   }
 
+  /**
+   * 批量处理数组项
+   * @param items 待处理项数组
+   * @param processor 处理函数
+   * @param batchSize 批处理大小
+   * @private
+   */
   private async processBatch<T>(
     items: T[],
     processor: (item: T) => Promise<void>,
