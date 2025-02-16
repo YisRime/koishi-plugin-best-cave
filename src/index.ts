@@ -22,8 +22,9 @@ export const Config: Schema<Config> = Schema.object({
   number: Schema.number().default(60),              // 冷却时间(秒)
   enableAudit: Schema.boolean().default(false),     // 启用审核
   imageMaxSize: Schema.number().default(4),         // 图片大小限制(MB)
-  enableDuplicate: Schema.boolean().default(true), // 开启查重
-  duplicateThreshold: Schema.number().default(0.8), // 查重阈值(0-1)
+  enableMD5: Schema.boolean().default(true),        // 启用MD5查重
+  enableDuplicate: Schema.boolean().default(true),  // 启用相似度查重
+  duplicateThreshold: Schema.number().default(0.8), // 相似度查重阈值(0-1)
   allowVideo: Schema.boolean().default(true),       // 允许视频
   videoMaxSize: Schema.number().default(16),        // 视频大小限制(MB)
   enablePagination: Schema.boolean().default(false),// 启用分页
@@ -607,6 +608,7 @@ export interface Config {
   itemsPerPage: number;
   duplicateThreshold: number;
   enableDuplicate: boolean;
+  enableMD5: boolean;
 }
 
 // 定义数据类型接口
@@ -867,27 +869,31 @@ async function saveMedia(
         // 获取原始文件名(MD5)
         const baseName = path.basename(fileName || 'md5', ext).replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
 
-        // 查找是否存在相同MD5的文件
-        const files = await fs.promises.readdir(resourceDir);
-        const duplicateFile = files.find(file => file.startsWith(baseName + '_'));
+        // 如果启用了MD5查重，检查是否存在相同MD5的文件
+        if (config.enableMD5) {
+          const files = await fs.promises.readdir(resourceDir);
+          const duplicateFile = files.find(file => file.startsWith(baseName + '_'));
 
-        if (duplicateFile) {
-          const duplicateCaveId = parseInt(duplicateFile.split('_')[1]);
-          if (!isNaN(duplicateCaveId)) {
-            const caveFilePath = path.join(ctx.baseDir, 'data', 'cave', 'cave.json');
-            const data = await FileHandler.readJsonData<CaveObject>(caveFilePath);
-            const originalCave = data.find(item => item.cave_id === duplicateCaveId);
+          if (duplicateFile) {
+            const duplicateCaveId = parseInt(duplicateFile.split('_')[1]);
+            if (!isNaN(duplicateCaveId)) {
+              const caveFilePath = path.join(ctx.baseDir, 'data', 'cave', 'cave.json');
+              const data = await FileHandler.readJsonData<CaveObject>(caveFilePath);
+              const originalCave = data.find(item => item.cave_id === duplicateCaveId);
 
-            if (originalCave) {
-              const message = session.text('commands.cave.error.exactDuplicateFound');
-              await session.send(message + await buildMessage(originalCave, resourceDir, session));
-              throw new Error('duplicate_found');
+              if (originalCave) {
+                const message = session.text('commands.cave.error.exactDuplicateFound');
+                await session.send(message + await buildMessage(originalCave, resourceDir, session));
+                throw new Error('duplicate_found');
+              }
             }
           }
         }
 
-        // 如果启用了相似度检查，继续进行perceptual hash比较
+        // 如果启用了相似度查重，进行perceptual hash比较
         if (config.enableDuplicate) {
+          const hashStorage = new HashStorage(path.join(ctx.baseDir, 'data', 'cave'));
+          await hashStorage.initialize();
           const result = await hashStorage.findDuplicates([buffer], config.duplicateThreshold);
 
           if (result.length > 0 && result[0] !== null) {
