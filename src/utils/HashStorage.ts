@@ -167,12 +167,13 @@ export class HashStorage {
       processedCount++;
 
       if (processedCount % 100 === 0 || processedCount === total) {
-        logger.info(`Processing caves: ${processedCount}/${total} (${Math.floor(processedCount / total * 100)}%)`);
+        logger.info(`Progress: ${processedCount}/${total} caves (${Math.floor(processedCount / total * 100)}%)`);
       }
     }
 
     await this.saveHashes();
-    logger.info(`Processed ${processedCount} caves with ${this.imageHashes.size} images and ${this.textHashes.size} texts`);
+    const stats = this.getStorageStats();
+    logger.info(`Cave Hashes Initialized: ${stats.text} text hashes, ${stats.image} image hashes`);
   }
 
   /**
@@ -186,26 +187,17 @@ export class HashStorage {
     const total = missingImageCaves.length + missingTextCaves.length;
 
     if (total > 0) {
-      let processedCount = 0;
-
       for (const cave of missingImageCaves) {
         await this.processCaveHashes(cave);
-        processedCount++;
-        if (processedCount % 100 === 0 || processedCount === total) {
-          logger.info(`Updating missing hashes: ${processedCount}/${total} (${Math.floor(processedCount / total * 100)}%)`);
-        }
       }
 
       for (const cave of missingTextCaves) {
         await this.processCaveTextHashes(cave);
-        processedCount++;
-        if (processedCount % 100 === 0 || processedCount === total) {
-          logger.info(`Updating missing hashes: ${processedCount}/${total} (${Math.floor(processedCount / total * 100)}%)`);
-        }
       }
 
       await this.saveHashes();
-      logger.info(`Updated ${missingImageCaves.length} missing images and ${missingTextCaves.length} missing texts`);
+      const stats = this.getStorageStats();
+      logger.info(`Hash storage updated: ${stats.text} text hashes, ${stats.image} image hashes`);
     }
   }
 
@@ -285,5 +277,18 @@ export class HashStorage {
    */
   static hashText(text: string): string {
     return crypto.createHash('md5').update(text).digest('hex');
+  }
+
+  /**
+   * 获取存储统计数据
+   * @private
+   */
+  private getStorageStats() {
+    const textCount = Array.from(this.textHashes.values()).reduce((sum, arr) => sum + arr.length, 0);
+    const imageCount = Array.from(this.imageHashes.values()).reduce((sum, arr) => sum + arr.length, 0);
+    return {
+      text: textCount,
+      image: imageCount
+    };
   }
 }
