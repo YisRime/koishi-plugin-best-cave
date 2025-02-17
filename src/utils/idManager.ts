@@ -114,7 +114,6 @@ export class IdManager {
       // 保存更新后的状态
       await this.saveStatus();
       this.initialized = true;
-      logger.success('ID Manager initialized');
 
     } catch (error) {
       this.initialized = false;
