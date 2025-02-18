@@ -15,6 +15,15 @@
   - 引用消息自动解析和保存
   - 支持引用已有内容的布局
 
+- **重复检测**
+  - 独立的文本与图片查重开关
+  - 可配置的文本相似度阈值
+  - 可配置的图片相似度阈值
+  - 基于感知哈希的图片查重
+  - 基于MD5的精确查重
+  - 精确重复自动拒绝
+  - 相似内容提示预览
+
 - **审核机制**
   - 可配置的审核开关与多级权限
   - 完整的黑白名单系统（支持用户/群组/频道）
@@ -27,9 +36,9 @@
   - 智能处理多种类型媒体链接
   - 支持本地图片上传和URL引用
   - 自动文件大小检查与限制
-  - 基于感知哈希的图片查重
-  - 可配置的相似度阈值检测
-  - MD5文件名重复检查
+  - 视频内容自动单独发送
+  - MD5文件名防重复
+  - 自动清理无效媒体
 
 - **使用体验**
   - 基于群组的调用冷却机制
@@ -64,7 +73,10 @@
 | number | number | 60 | 冷却时间(秒) |
 | enableAudit | boolean | false | 是否启用审核 |
 | imageMaxSize | number | 4 | 图片大小限制(MB) |
-| duplicateThreshold | number | 0.8 | 图片查重阈值(0-1) |
+| enableImageDuplicate | boolean | true | 是否启用图片查重 |
+| imageDuplicateThreshold | number | 0.8 | 图片查重阈值(0-1) |
+| enableTextDuplicate | boolean | true | 是否启用文本查重 |
+| textDuplicateThreshold | number | 0.9 | 文本查重阈值(0-1) |
 | allowVideo | boolean | true | 是否允许视频 |
 | videoMaxSize | number | 16 | 视频大小限制(MB) |
 | enablePagination | boolean | false | 是否启用分页 |

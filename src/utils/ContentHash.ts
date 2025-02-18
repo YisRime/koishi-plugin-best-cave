@@ -5,7 +5,7 @@ import { Buffer } from 'buffer';
  * 图片哈希计算工具类
  * 使用 DCT(离散余弦变换)方法计算图片的感知哈希值，可用于图片相似度比较
  */
-export class ImageHasher {
+export class ContentHasher {
   /**
    * 计算图片的感知哈希值
    * @param imageBuffer - 图片的二进制数据
@@ -179,6 +179,23 @@ export class ImageHasher {
     // 将汉明距离转换为0-1的相似度值
     // 64位hash的最大汉明距离是64
     return (64 - distance) / 64;
+  }
+
+  /**
+   * 计算文本的哈希值
+   * @param text - 输入文本
+   * @returns 文本的哈希值(36进制字符串)
+   */
+  static calculateTextHash(text: string): string {
+    // 使用简单的文本规范化和hash算法
+    const normalizedText = text.toLowerCase().trim().replace(/\s+/g, ' ');
+    let hash = 0;
+    for (let i = 0; i < normalizedText.length; i++) {
+      const char = normalizedText.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return hash.toString(36);
   }
 
   /**
