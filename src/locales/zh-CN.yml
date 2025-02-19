@@ -27,9 +27,19 @@ commands:
       a: "添加回声洞"
       g: "查看回声洞"
       r: "删除回声洞"
-      p: "通过审核（批量）"
-      d: "拒绝审核（批量）"
       l: "查询投稿统计"
+    pass:
+      description: 通过回声洞审核
+      usage: |
+        通过指定ID的回声洞审核
+        cave.pass <ID> - 通过审核
+        cave.pass all - 通过所有待审核内容
+    reject:
+      description: 拒绝回声洞审核
+      usage: |
+        拒绝指定ID的回声洞审核
+        cave.reject <ID> - 拒绝审核
+        cave.reject all - 拒绝所有待审核内容
     add:
       noContent: "请在一分钟内发送内容"
       operationTimeout: "操作超时，添加取消"

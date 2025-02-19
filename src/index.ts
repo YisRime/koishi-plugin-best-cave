@@ -1,6 +1,3 @@
-// 回声洞插件 - 提供文本、图片、视频的投稿与管理功能
-
-// 导入依赖
 import { Context, Schema, h, Logger } from 'koishi'
 import * as fs from 'fs';
 import * as path from 'path';
@@ -62,7 +59,7 @@ export async function apply(ctx: Context, config: Config) {
 
   // 初始化核心组件
   const idManager = new IdManager(ctx.baseDir);
-  const contentHashManager = new ContentHashManager(caveDir);  // 更新类名
+  const contentHashManager = new ContentHashManager(caveDir);
   const auditManager = new AuditManager(ctx, config, caveDir, idManager);
 
   // 等待所有组件初始化完成
@@ -256,7 +253,7 @@ export async function apply(ctx: Context, config: Config) {
     let caveId: number;
     try {
       const inputContent = content.length > 0 ? content.join('\n') : await (async () => {
-        await sendMessage(session, 'commands.cave.add.noContent', [], true);
+        await sendMessage(session, 'commands.cave.add.noContent', [], true, 60000);
         const reply = await session.prompt({ timeout: 60000 });
         if (!reply) throw new Error(session.text('commands.cave.add.operationTimeout'));
         return reply;
@@ -430,22 +427,16 @@ export async function apply(ctx: Context, config: Config) {
     }
   }
 
-  // 注册命令并配置权限检查
-  ctx.command('cave [message]')
+  // 注册主命令和子命令
+  const caveCommand = ctx.command('cave [message]')
     .option('a', '添加回声洞')
     .option('g', '查看回声洞', { type: 'string' })
     .option('r', '删除回声洞', { type: 'string' })
-    .option('p', '通过审核', { type: 'string' })
-    .option('d', '拒绝审核', { type: 'string' })
     .option('l', '查询投稿统计', { type: 'string' })
     .before(async ({ session, options }) => {
       // 黑名单检查
       if (config.blacklist.includes(session.userId)) {
         return sendMessage(session, 'commands.cave.message.blacklisted', [], true);
-      }
-      // 审核命令权限检查
-      if ((options.p || options.d) && !config.manager.includes(session.userId)) {
-        return sendMessage(session, 'commands.cave.message.managerOnly', [], true);
       }
     })
     .action(async ({ session, options }, ...content) => {
@@ -456,7 +447,7 @@ export async function apply(ctx: Context, config: Config) {
       const pendingFilePath = path.join(caveDir, 'pending.json');
 
       // 基础检查 - 需要冷却的命令
-      const needsCooldown = !options.l && !options.a && !options.p && !options.d;
+      const needsCooldown = !options.l && !options.a;
       if (needsCooldown) {
         const guildId = session.guildId;
         const now = Date.now();
@@ -492,9 +483,6 @@ export async function apply(ctx: Context, config: Config) {
         }
       }
 
-      if (options.p || options.d) {
-        return await processAudit(pendingFilePath, caveFilePath, resourceDir, session, options, content);
-      }
       if (options.g) {
         return await processView(caveFilePath, resourceDir, session, options, content);
       }
@@ -505,7 +493,58 @@ export async function apply(ctx: Context, config: Config) {
         return await processAdd(ctx, config, caveFilePath, resourceDir, pendingFilePath, session, content);
       }
       return await processRandom(caveFilePath, resourceDir, session);
-    });
+    })
+
+  // 通过审核子命令
+  caveCommand
+    .subcommand('.pass <id:text>', '通过回声洞审核')
+    .before(async ({ session }) => {
+      if (!config.manager.includes(session.userId)) {
+        return sendMessage(session, 'commands.cave.message.managerOnly', [], true);
+      }
+    })
+    .action(async ({ session }, id) => {
+      const dataDir = path.join(ctx.baseDir, 'data');
+      const caveDir = path.join(dataDir, 'cave');
+      const caveFilePath = path.join(caveDir, 'cave.json');
+      const resourceDir = path.join(caveDir, 'resources');
+      const pendingFilePath = path.join(caveDir, 'pending.json');
+
+      return await processAudit(
+        pendingFilePath,
+        caveFilePath,
+        resourceDir,
+        session,
+        { p: true },
+        [id]
+      );
+    })
+
+  // 拒绝审核子命令
+  caveCommand
+    .subcommand('.reject <id:text>', '拒绝回声洞审核')
+    .before(async ({ session }) => {
+      if (!config.manager.includes(session.userId)) {
+        return sendMessage(session, 'commands.cave.message.managerOnly', [], true);
+      }
+    })
+    .action(async ({ session }, id) => {
+      const dataDir = path.join(ctx.baseDir, 'data');
+      const caveDir = path.join(dataDir, 'cave');
+      const caveFilePath = path.join(caveDir, 'cave.json');
+      const resourceDir = path.join(caveDir, 'resources');
+      const pendingFilePath = path.join(caveDir, 'pending.json');
+
+      return await processAudit(
+        pendingFilePath,
+        caveFilePath,
+        resourceDir,
+        session,
+        { d: true },
+        [id]
+      );
+    })
+
 }
 
 // 日志记录器

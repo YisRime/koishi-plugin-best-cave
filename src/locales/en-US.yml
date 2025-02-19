@@ -27,9 +27,19 @@ commands:
       a: "Add echo"
       g: "View echo"
       r: "Delete echo"
-      p: "Approve moderation (batch)"
-      d: "Reject moderation (batch)"
       l: "Query submission statistics"
+    pass:
+      description: Approve cave submission
+      usage: |
+        Approve cave submission with specific ID
+        cave.pass <ID> - Approve submission
+        cave.pass all - Approve all pending submissions
+    reject:
+      description: Reject cave submission
+      usage: |
+        Reject cave submission with specific ID
+        cave.reject <ID> - Reject submission
+        cave.reject all - Reject all pending submissions
     add:
       noContent: "Please send content within one minute"
       operationTimeout: "Operation timeout, addition cancelled"
