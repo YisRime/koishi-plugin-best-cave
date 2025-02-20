@@ -255,7 +255,7 @@ export async function apply(ctx: Context, config: Config) {
       const inputContent = content.length > 0 ? content.join('\n') : await (async () => {
         await sendMessage(session, 'commands.cave.add.noContent', [], true, 60000);
         const reply = await session.prompt({ timeout: 60000 });
-        if (!reply) throw new Error(session.text('commands.cave.add.operationTimeout'));
+        if (!reply) sendMessage(session, 'commands.cave.add.operationTimeout', [], true);
         return reply;
       })();
 
@@ -363,40 +363,29 @@ export async function apply(ctx: Context, config: Config) {
 
       // 检查内容重复 - 直接使用已下载的buffers
       if (config.enableImageDuplicate || config.enableTextDuplicate) {
-        try {
-          const duplicateResults = await contentHashManager.findDuplicates({
-            images: config.enableImageDuplicate ? imageBuffers : undefined,
-            texts: config.enableTextDuplicate ?
-              textParts.filter((p): p is TextElement => p.type === 'text').map(p => p.content) : undefined
-          }, {
-            image: config.imageDuplicateThreshold,
-            text: config.textDuplicateThreshold
-          });
+        const duplicateResults = await contentHashManager.findDuplicates({
+          images: config.enableImageDuplicate ? imageBuffers : undefined,
+          texts: config.enableTextDuplicate ?
+            textParts.filter((p): p is TextElement => p.type === 'text').map(p => p.content) : undefined
+        }, {
+          image: config.imageDuplicateThreshold,
+          text: config.textDuplicateThreshold
+        });
 
-          // 处理重复检测结果
-          for (const result of duplicateResults) {
-            if (!result) continue;
+        // 处理重复检测结果
+        for (const result of duplicateResults) {
+          if (!result) continue;
 
-            const originalCave = data.find(item => item.cave_id === result.caveId);
-            if (!originalCave) continue;
+          const originalCave = data.find(item => item.cave_id === result.caveId);
+          if (!originalCave) continue;
 
-            // 回收未使用的ID
-            await idManager.markDeleted(caveId);
+          // 回收未使用的ID
+          await idManager.markDeleted(caveId);
 
-            const duplicateMessage = session.text('commands.cave.error.similarDuplicateFound',
-              [(result.similarity * 100).toFixed(1)]);
-            await session.send(duplicateMessage + await buildMessage(originalCave, resourceDir, session));
-            throw new Error('duplicate_found');
-          }
-        } catch (error) {
-          // 确保在任何错误发生时都回收ID
-          if (error.message !== 'duplicate_found') {
-            await idManager.markDeleted(caveId);
-          }
-          if (error.message === 'duplicate_found') {
-            return ''; // 直接返回空字符串，因为消息已经在前面发送
-          }
-          return sendMessage(session, 'commands.cave.error.addFailed', [], true);
+          const duplicateMessage = session.text('commands.cave.error.similarDuplicateFound',
+            [(result.similarity * 100).toFixed(1)]);
+          await session.send(duplicateMessage + await buildMessage(originalCave, resourceDir, session));
+          throw new Error('duplicate_found');
         }
       }
 
@@ -415,12 +404,12 @@ export async function apply(ctx: Context, config: Config) {
       return sendMessage(session, 'commands.cave.add.addSuccess', [caveId], false);
 
     } catch (error) {
-      // 如果不是重复检测导致的错误，也需要回收ID
+      // 如果不是重复检测导致的错误，需要回收ID
       if (error.message !== 'duplicate_found') {
         await idManager.markDeleted(caveId);
       }
       if (error.message === 'duplicate_found') {
-        return ''; // 直接返回空字符串，因为消息已经在前面发送
+        return '';
       }
       logger.error(`Failed to process add command: ${error.message}`);
       return sendMessage(session, 'commands.cave.error.addFailed', [], true);
