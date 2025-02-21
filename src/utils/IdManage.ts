@@ -180,19 +180,31 @@ export class IdManager {
     }
 
     let nextId: number;
-    if (this.deletedIds.size === 0) {
-      nextId = ++this.maxId;
+
+    // 首先尝试从已删除的ID中获取最小值
+    if (this.deletedIds.size > 0) {
+      const minDeletedId = Math.min(...Array.from(this.deletedIds));
+      if (!isNaN(minDeletedId) && minDeletedId > 0) {
+        nextId = minDeletedId;
+        this.deletedIds.delete(nextId);
+      } else {
+        // 如果已删除ID无效，则使用maxId + 1
+        nextId = this.maxId + 1;
+      }
     } else {
-      nextId = Math.min(...Array.from(this.deletedIds));
-      this.deletedIds.delete(nextId);
+      // 没有已删除的ID时，使用maxId + 1
+      nextId = this.maxId + 1;
     }
 
-    while (this.usedIds.has(nextId)) {
-      nextId = ++this.maxId;
+    // 确保ID为正整数且不重复
+    while (isNaN(nextId) || nextId <= 0 || this.usedIds.has(nextId)) {
+      nextId = this.maxId + 1;
+      this.maxId++;
     }
 
     this.usedIds.add(nextId);
 
+    // 异步保存状态，但不等待完成
     this.saveStatus().catch(err =>
       logger.error(`Failed to save status after getNextId: ${err.message}`)
     );

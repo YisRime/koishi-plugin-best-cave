@@ -252,14 +252,18 @@ export async function apply(ctx: Context, config: Config) {
   ): Promise<string> {
     let caveId: number;
     try {
+      // 获取新ID并验证
+      caveId = await idManager.getNextId();
+      if (isNaN(caveId) || caveId <= 0) {
+        throw new Error('Invalid ID generated');
+      }
+
       const inputContent = content.length > 0 ? content.join('\n') : await (async () => {
         await sendMessage(session, 'commands.cave.add.noContent', [], true, 60000);
         const reply = await session.prompt({ timeout: 60000 });
         if (!reply) sendMessage(session, 'commands.cave.add.operationTimeout', [], true);
         return reply;
       })();
-
-      caveId = await idManager.getNextId();
 
       if (inputContent.includes('/app/.config/QQ/')) {
         return sendMessage(session, 'commands.cave.add.localFileNotAllowed', [], true);
@@ -303,7 +307,7 @@ export async function apply(ctx: Context, config: Config) {
       ]);
 
       const newCave: CaveObject = {
-        cave_id: caveId,
+        cave_id: caveId,  // 确保使用有效的数字ID
         elements: [
           ...textParts,
           ...imageElements.map((el, idx) => ({
@@ -312,9 +316,9 @@ export async function apply(ctx: Context, config: Config) {
             // 保持原始文本和图片的相对位置
             index: el.index
           }))
-        ].sort((a, b) => a.index - a.index),
-        contributor_number: session.userId,
-        contributor_name: session.username
+        ].sort((a, b) => a.index - b.index),
+        contributor_number: session.userId || '100000',  // 添加默认值
+        contributor_name: session.username || 'User'  // 添加默认值
       };
 
       // 如果有视频，直接添加到elements末尾，不需要计算index
@@ -404,13 +408,15 @@ export async function apply(ctx: Context, config: Config) {
       return sendMessage(session, 'commands.cave.add.addSuccess', [caveId], false);
 
     } catch (error) {
-      // 如果不是重复检测导致的错误，需要回收ID
-      if (error.message !== 'duplicate_found') {
+      // 在出错时确保回收ID
+      if (typeof caveId === 'number' && !isNaN(caveId) && caveId > 0) {
         await idManager.markDeleted(caveId);
       }
+
       if (error.message === 'duplicate_found') {
         return '';
       }
+
       logger.error(`Failed to process add command: ${error.message}`);
       return sendMessage(session, 'commands.cave.error.addFailed', [], true);
     }
