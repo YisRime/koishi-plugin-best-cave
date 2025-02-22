@@ -197,17 +197,4 @@ export class ContentHasher {
     }
     return hash.toString(36);
   }
-
-  /**
-   * 批量比较一个新哈希值与多个已存在哈希值的相似度
-   * @param newHash - 新的哈希值
-   * @param existingHashes - 已存在的哈希值数组
-   * @returns 相似度数组，每个元素对应一个已存在哈希值的相似度
-   */
-  static batchCompareSimilarity(
-    newHash: string,
-    existingHashes: string[]
-  ): number[] {
-    return existingHashes.map(hash => this.calculateSimilarity(newHash, hash));
-  }
 }

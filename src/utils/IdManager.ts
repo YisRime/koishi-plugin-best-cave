@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from 'koishi';
-import { FileHandler } from './FileHandle';
+import { FileHandler } from './FileHandler';
 
 const logger = new Logger('IdManager');
 

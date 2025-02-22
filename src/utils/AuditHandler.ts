@@ -2,8 +2,8 @@ import { Context, Logger } from 'koishi'
 import * as fs from 'fs'
 import * as path from 'path'
 import { Config } from '../index'
-import { FileHandler } from './FileHandle'
-import { IdManager } from './IdManage'
+import { FileHandler } from './FileHandler'
+import { IdManager } from './IdManager'
 
 export interface CaveObject {
   cave_id: number

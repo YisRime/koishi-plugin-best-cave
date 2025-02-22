@@ -1,14 +1,21 @@
-import { Context, Logger } from 'koishi';
+import { Context, Logger, h } from 'koishi';
 import * as fs from 'fs';
 import * as path from 'path';
-import { FileHandler } from './FileHandle';
-import { ContentHashManager } from './HashManage';
+import { FileHandler } from './FileHandler';
+import { HashManager } from './HashManager';
 
 const logger = new Logger('MediaHandle');
 
 export interface BaseElement {
   type: 'text' | 'img' | 'video';
   index: number;
+}
+
+interface CaveObject {
+  cave_id: number
+  elements: Element[]
+  contributor_number: string
+  contributor_name: string
 }
 
 export interface TextElement extends BaseElement {
@@ -25,6 +32,87 @@ export interface MediaElement extends BaseElement {
 }
 
 export type Element = TextElement | MediaElement;
+
+export async function buildMessage(cave: CaveObject, resourceDir: string, session?: any): Promise<string> {
+  if (!cave?.elements?.length) {
+    return session.text('commands.cave.error.noContent');
+  }
+
+  // 分离视频元素和其他元素，并确保按index排序
+  const videoElement = cave.elements.find((el): el is MediaElement => el.type === 'video');
+  const nonVideoElements = cave.elements
+    .filter(el => el.type !== 'video')
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+  // 如果有视频元素，先发送基本信息，然后单独发送视频
+  if (videoElement?.file) {
+    // 构建基本信息
+    const basicInfo = [
+      session.text('commands.cave.message.caveTitle', [cave.cave_id]),
+      session.text('commands.cave.message.contributorSuffix', [cave.contributor_name])
+    ].join('\n');
+
+    // 先发送标题和作者信息
+    await session?.send(basicInfo);
+
+    // 发送视频
+    const filePath = path.join(resourceDir, videoElement.file);
+    const base64Data = await processMediaFile(filePath, 'video');
+    if (base64Data && session) {
+      await session.send(h('video', { src: base64Data }));
+    }
+    return '';
+  }
+
+  // 如果没有视频，按原来的方式处理
+  const lines = [session.text('commands.cave.message.caveTitle', [cave.cave_id])];
+
+  for (const element of nonVideoElements) {
+    if (element.type === 'text') {
+      lines.push(element.content);
+    } else if (element.type === 'img' && element.file) {
+      const filePath = path.join(resourceDir, element.file);
+      const base64Data = await processMediaFile(filePath, 'image');
+      if (base64Data) {
+        lines.push(h('image', { src: base64Data }));
+      }
+    }
+  }
+
+  lines.push(session.text('commands.cave.message.contributorSuffix', [cave.contributor_name]));
+  return lines.join('\n');
+}
+
+export async function sendMessage(
+  session: any,
+  key: string,
+  params: any[] = [],
+  isTemp = true,
+  timeout = 10000
+): Promise<string> {
+  try {
+    const msg = await session.send(session.text(key, params));
+    if (isTemp && msg) {
+      setTimeout(async () => {
+        try {
+          await session.bot.deleteMessage(session.channelId, msg);
+        } catch (error) {
+          logger.debug(`Failed to delete temporary message: ${error.message}`);
+        }
+      }, timeout);
+    }
+  } catch (error) {
+    logger.error(`Failed to send message: ${error.message}`);
+  }
+  return '';
+}
+
+// 处理媒体文件
+export async function processMediaFile(filePath: string, type: 'image' | 'video'): Promise<string | null> {
+  const data = await fs.promises.readFile(filePath).catch(() => null);
+  if (!data) return null;
+  return `data:${type}/${type === 'image' ? 'png' : 'mp4'};base64,${data.toString('base64')}`;
+}
 
 export async function extractMediaContent(
   originalContent: string,
@@ -99,7 +187,7 @@ export async function saveMedia(
   buffers?: Buffer[] // 新增参数用于收集buffer
 ): Promise<string[]> {
   const accept = mediaType === 'img' ? 'image/*' : 'video/*';
-  const hashStorage = new ContentHashManager(path.join(ctx.baseDir, 'data', 'cave'));
+  const hashStorage = new HashManager(path.join(ctx.baseDir, 'data', 'cave'));
   await hashStorage.initialize();
 
   const downloadTasks = urls.map(async (url, i) => {
@@ -193,26 +281,4 @@ export async function saveMedia(
     }
   });
   return Promise.all(downloadTasks);
-}
-
-interface CaveObject {
-  cave_id: number;
-  elements: Element[];
-  contributor_number: string;
-  contributor_name: string;
-}
-
-async function buildMessage(cave: CaveObject, resourceDir: string, session?: any): Promise<string> {
-  if (!cave?.elements?.length) {
-    return session.text('commands.cave.error.noContent');
-  }
-
-  const lines = [session.text('commands.cave.message.caveTitle', [cave.cave_id])];
-  for (const element of cave.elements) {
-    if (element.type === 'text') {
-      lines.push((element as TextElement).content);
-    }
-  }
-  lines.push(session.text('commands.cave.message.contributorSuffix', [cave.contributor_name]));
-  return lines.join('\n');
 }
