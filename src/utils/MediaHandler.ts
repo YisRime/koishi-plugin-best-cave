@@ -1,8 +1,6 @@
 import { Context, Logger, h } from 'koishi';
 import * as fs from 'fs';
 import * as path from 'path';
-import { pathToFileURL } from 'url';
-import { resolve } from 'path';
 import { MediaElement, Element, CaveObject } from '..';
 import { FileHandler } from './FileHandler';
 import { HashManager } from './HashManager';
@@ -49,9 +47,11 @@ export async function buildMessage(cave: CaveObject, resourceDir: string, sessio
     if (element.type === 'text') {
       lines.push(element.content);
     } else if (element.type === 'img' && element.file) {
-      const filePath = resolve(resourceDir, element.file); // 使用resolve确保是绝对路径
-      const fileUrl = pathToFileURL(filePath);
-      lines.push(h('image', { src: fileUrl.toString() }));
+      const filePath = path.join(resourceDir, element.file);
+      const base64Data = await processMediaFile(filePath, 'image');
+      if (base64Data) {
+        lines.push(h('image', { src: base64Data }));
+      }
     }
   }
 
