@@ -1,38 +1,9 @@
 import { Context, Logger } from 'koishi'
 import * as fs from 'fs'
 import * as path from 'path'
-import { Config } from '../index'
+import { Config, Element, TextElement, MediaElement, CaveObject, PendingCave } from '..'
 import { FileHandler } from './FileHandler'
 import { IdManager } from './IdManager'
-
-export interface CaveObject {
-  cave_id: number
-  elements: Element[]
-  contributor_number: string
-  contributor_name: string
-}
-
-interface BaseElement {
-  type: 'text' | 'img' | 'video'
-  index: number
-}
-
-interface TextElement extends BaseElement {
-  type: 'text'
-  content: string
-}
-
-interface MediaElement extends BaseElement {
-  type: 'img' | 'video'
-  file?: string
-  fileName?: string
-  fileSize?: string
-  filePath?: string
-}
-
-type Element = TextElement | MediaElement
-
-export interface PendingCave extends CaveObject {}
 
 export class AuditManager {
   private logger = new Logger('AuditManager')
@@ -40,7 +11,6 @@ export class AuditManager {
   constructor(
     private ctx: Context,
     private config: Config,
-    private caveDir: string,
     private idManager: IdManager
   ) {}
 

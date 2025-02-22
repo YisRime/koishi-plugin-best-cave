@@ -6,12 +6,42 @@ import { FileHandler } from './utils/FileHandler'
 import { IdManager } from './utils/IdManager'
 import { HashManager } from './utils/HashManager'
 import { AuditManager } from './utils/AuditHandler'
-import { extractMediaContent, Element, TextElement, MediaElement, saveMedia, buildMessage, sendMessage } from './utils/MediaHandler'
+import { extractMediaContent, saveMedia, buildMessage, sendMessage } from './utils/MediaHandler'
 import { processList, processView, processRandom, processDelete } from './utils/ProcessHandle'
 
 // 基础定义
 export const name = 'best-cave';
 export const inject = ['database'];
+
+// 核心类型定义
+export interface BaseElement {
+  type: 'text' | 'img' | 'video'
+  index: number
+}
+
+export interface TextElement extends BaseElement {
+  type: 'text'
+  content: string
+}
+
+export interface MediaElement extends BaseElement {
+  type: 'img' | 'video'
+  file?: string
+  fileName?: string
+  fileSize?: string
+  filePath?: string
+}
+
+export type Element = TextElement | MediaElement
+
+export interface CaveObject {
+  cave_id: number
+  elements: Element[]
+  contributor_number: string
+  contributor_name: string
+}
+
+export interface PendingCave extends CaveObject {}
 
 /**
  * 插件配置项
@@ -61,7 +91,7 @@ export async function apply(ctx: Context, config: Config) {
   // 初始化核心组件
   const idManager = new IdManager(ctx.baseDir);
   const contentHashManager = new HashManager(caveDir);
-  const auditManager = new AuditManager(ctx, config, caveDir, idManager);
+  const auditManager = new AuditManager(ctx, config, idManager);
 
   // 等待所有组件初始化完成
   await Promise.all([
@@ -389,10 +419,6 @@ export interface Config {
   textDuplicateThreshold: number;
   enableTextDuplicate: boolean;
 }
-
-// 定义数据类型接口
-interface CaveObject { cave_id: number; elements: Element[]; contributor_number: string; contributor_name: string }
-interface PendingCave extends CaveObject {}
 
 // 消息构建工具
 // 清理元素数据用于保存

@@ -1,10 +1,10 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { Config } from '../index'
+import { Config, Element } from '..'
 import { FileHandler } from './FileHandler'
 import { IdManager } from './IdManager'
 import { HashManager } from './HashManager'
-import { Element, buildMessage, sendMessage } from './MediaHandler'
+import { buildMessage, sendMessage } from './MediaHandler'
 
 interface CaveObject {
   cave_id: number

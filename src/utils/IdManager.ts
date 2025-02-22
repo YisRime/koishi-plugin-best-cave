@@ -1,24 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from 'koishi';
+import { CaveObject, PendingCave } from '..';
 import { FileHandler } from './FileHandler';
 
 const logger = new Logger('IdManager');
-
-/**
- * 回声洞对象接口
- */
-interface CaveObject {
-  /** 回声洞ID */
-  cave_id: number;
-  /** 贡献者编号 */
-  contributor_number: string;
-}
-
-/**
- * 待处理回声洞对象接口
- */
-interface PendingCave extends CaveObject {}
 
 /**
  * ID管理器类

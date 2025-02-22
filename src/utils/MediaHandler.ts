@@ -1,37 +1,13 @@
 import { Context, Logger, h } from 'koishi';
 import * as fs from 'fs';
 import * as path from 'path';
+import { MediaElement, Element, CaveObject } from '..';
 import { FileHandler } from './FileHandler';
 import { HashManager } from './HashManager';
 
 const logger = new Logger('MediaHandle');
 
-export interface BaseElement {
-  type: 'text' | 'img' | 'video';
-  index: number;
-}
-
-interface CaveObject {
-  cave_id: number
-  elements: Element[]
-  contributor_number: string
-  contributor_name: string
-}
-
-export interface TextElement extends BaseElement {
-  type: 'text';
-  content: string;
-}
-
-export interface MediaElement extends BaseElement {
-  type: 'img' | 'video';
-  file?: string;
-  fileName?: string;
-  fileSize?: string;
-  filePath?: string;
-}
-
-export type Element = TextElement | MediaElement;
+// 删除重复的接口定义，改用导入的类型
 
 export async function buildMessage(cave: CaveObject, resourceDir: string, session?: any): Promise<string> {
   if (!cave?.elements?.length) {
