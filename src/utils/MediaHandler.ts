@@ -48,10 +48,7 @@ export async function buildMessage(cave: CaveObject, resourceDir: string, sessio
       lines.push(element.content);
     } else if (element.type === 'img' && element.file) {
       const filePath = path.join(resourceDir, element.file);
-      const base64Data = await processMediaFile(filePath, 'image');
-      if (base64Data) {
-        lines.push(h('image', { src: base64Data }));
-      }
+      lines.push(h.image(filePath));
     }
   }
 
@@ -85,9 +82,19 @@ export async function sendMessage(
 
 // 处理媒体文件
 export async function processMediaFile(filePath: string, type: 'image' | 'video'): Promise<string | null> {
-  const data = await fs.promises.readFile(filePath).catch(() => null);
-  if (!data) return null;
-  return `data:${type}/${type === 'image' ? 'png' : 'mp4'};base64,${data.toString('base64')}`;
+  // 检查文件是否存在
+  try {
+    await fs.promises.access(filePath);
+    if (type === 'image') {
+      return filePath;
+    } else {
+      // 视频仍然使用base64
+      const data = await fs.promises.readFile(filePath);
+      return `data:${type}/mp4;base64,${data.toString('base64')}`;
+    }
+  } catch {
+    return null;
+  }
 }
 
 export async function extractMediaContent(
