@@ -9,21 +9,44 @@ import { AuditManager } from './utils/AuditHandler'
 import { extractMediaContent, saveMedia, buildMessage, sendMessage } from './utils/MediaHandler'
 import { processList, processView, processRandom, processDelete } from './utils/ProcessHandle'
 
-// 基础定义
 export const name = 'best-cave';
 export const inject = ['database'];
 
-// 核心类型定义
+const logger = new Logger('cave');
+
+/**
+ * 基础元素类型
+ * @interface BaseElement
+ * @property {('text'|'img'|'video')} type - 元素类型
+ * @property {number} index - 排序索引
+ */
 export interface BaseElement {
   type: 'text' | 'img' | 'video'
   index: number
 }
 
+/**
+ * 文本元素类型
+ * @interface TextElement
+ * @extends {BaseElement}
+ * @property {'text'} type - 文本类型
+ * @property {string} content - 文本内容
+ */
 export interface TextElement extends BaseElement {
   type: 'text'
   content: string
 }
 
+/**
+ * 媒体元素类型
+ * @interface MediaElement
+ * @extends {BaseElement}
+ * @property {('img'|'video')} type - 媒体类型
+ * @property {string} [file] - 文件名
+ * @property {string} [fileName] - 原始文件名
+ * @property {string} [fileSize] - 文件大小
+ * @property {string} [filePath] - 文件路径
+ */
 export interface MediaElement extends BaseElement {
   type: 'img' | 'video'
   file?: string
@@ -34,6 +57,14 @@ export interface MediaElement extends BaseElement {
 
 export type Element = TextElement | MediaElement
 
+/**
+ * 回声洞对象
+ * @interface CaveObject
+ * @property {number} cave_id - 回声洞ID
+ * @property {Element[]} elements - 元素列表
+ * @property {string} contributor_number - 投稿者ID
+ * @property {string} contributor_name - 投稿者名称
+ */
 export interface CaveObject {
   cave_id: number
   elements: Element[]
@@ -42,6 +73,24 @@ export interface CaveObject {
 }
 
 export interface PendingCave extends CaveObject {}
+
+// 核心类型定义
+export interface Config {
+  manager: string[];
+  number: number;
+  enableAudit: boolean;
+  allowVideo: boolean;
+  videoMaxSize: number;
+  imageMaxSize: number;
+  blacklist: string[];
+  whitelist: string[];
+  enablePagination: boolean;
+  itemsPerPage: number;
+  enableImageDuplicate: boolean;
+  imageDuplicateThreshold: number;
+  textDuplicateThreshold: number;
+  enableTextDuplicate: boolean;
+}
 
 /**
  * 插件配置项
@@ -101,6 +150,17 @@ export async function apply(ctx: Context, config: Config) {
 
   const lastUsed = new Map<string, number>();
 
+  /**
+   * 处理添加回声洞命令
+   * @param {Context} ctx - Koishi上下文
+   * @param {Config} config - 插件配置
+   * @param {string} caveFilePath - 回声洞数据文件路径
+   * @param {string} resourceDir - 资源目录路径
+   * @param {string} pendingFilePath - 待审核数据文件路径
+   * @param {any} session - 会话对象
+   * @param {string[]} content - 投稿内容
+   * @returns {Promise<string>} 处理结果消息
+   */
   async function processAdd(
     ctx: Context,
     config: Config,
@@ -112,7 +172,6 @@ export async function apply(ctx: Context, config: Config) {
   ): Promise<string> {
     let caveId: number;
     try {
-      // 获取新ID并验证
       caveId = await idManager.getNextId();
       if (isNaN(caveId) || caveId <= 0) {
         throw new Error('Invalid ID generated');
@@ -147,7 +206,6 @@ export async function apply(ctx: Context, config: Config) {
         return sendMessage(session, 'commands.cave.add.videoDisabled', [], true);
       }
 
-      // 先下载并保存媒体文件，这样我们可以复用buffers
       const imageBuffers: Buffer[] = [];
       const [savedImages, savedVideos] = await Promise.all([
         imageUrls.length > 0 ? saveMedia(
@@ -159,7 +217,7 @@ export async function apply(ctx: Context, config: Config) {
           config,
           ctx,
           session,
-          imageBuffers // 添加参数用于收集buffer
+          imageBuffers
         ) : [],
         videoUrls.length > 0 ? saveMedia(
           videoUrls,
@@ -174,21 +232,20 @@ export async function apply(ctx: Context, config: Config) {
       ]);
 
       const newCave: CaveObject = {
-        cave_id: caveId,  // 确保使用有效的数字ID
+        cave_id: caveId,
         elements: [
           ...textParts,
           ...imageElements.map((el, idx) => ({
             ...el,
             file: savedImages[idx],
-            // 保持原始文本和图片的相对位置
             index: el.index
           }))
         ].sort((a, b) => a.index - b.index),
-        contributor_number: session.userId || '100000',  // 添加默认值
-        contributor_name: session.username || 'User'  // 添加默认值
+        contributor_number: session.userId || '100000',
+        contributor_name: session.username || 'User'
       };
 
-      // 如果有视频，直接添加到elements末尾，不需要计算index
+      // 视频直接添加到elements末尾
       if (videoUrls.length > 0 && savedVideos.length > 0) {
         newCave.elements.push({
           type: 'video',
@@ -225,14 +282,13 @@ export async function apply(ctx: Context, config: Config) {
         return sendMessage(session, 'commands.cave.add.submitPending', [caveId], false);
       }
 
-      // 直接保存到 cave.json 时移除 index
       const data = await FileHandler.readJsonData<CaveObject>(caveFilePath);
       data.push({
         ...newCave,
         elements: cleanElementsForSave(newCave.elements, false)
       });
 
-      // 检查内容重复 - 直接使用已下载的buffers
+      // 检查内容重复
       if (config.enableImageDuplicate || config.enableTextDuplicate) {
         const duplicateResults = await contentHashManager.findDuplicates({
           images: config.enableImageDuplicate ? imageBuffers : undefined,
@@ -250,7 +306,6 @@ export async function apply(ctx: Context, config: Config) {
           const originalCave = data.find(item => item.cave_id === result.caveId);
           if (!originalCave) continue;
 
-          // 回收未使用的ID
           await idManager.markDeleted(caveId);
 
           const duplicateMessage = session.text('commands.cave.error.similarDuplicateFound',
@@ -275,7 +330,6 @@ export async function apply(ctx: Context, config: Config) {
       return sendMessage(session, 'commands.cave.add.addSuccess', [caveId], false);
 
     } catch (error) {
-      // 在出错时确保回收ID
       if (typeof caveId === 'number' && !isNaN(caveId) && caveId > 0) {
         await idManager.markDeleted(caveId);
       }
@@ -295,8 +349,7 @@ export async function apply(ctx: Context, config: Config) {
     .option('g', '查看回声洞', { type: 'string' })
     .option('r', '删除回声洞', { type: 'string' })
     .option('l', '查询投稿统计', { type: 'string' })
-    .before(async ({ session, options }) => {
-      // 黑名单检查
+    .before(async ({ session }) => {
       if (config.blacklist.includes(session.userId)) {
         return sendMessage(session, 'commands.cave.message.blacklisted', [], true);
       }
@@ -399,29 +452,12 @@ export async function apply(ctx: Context, config: Config) {
 
 }
 
-// 日志记录器
-const logger = new Logger('cave');
-
-// 核心类型定义
-export interface Config {
-  manager: string[];
-  number: number;
-  enableAudit: boolean;
-  allowVideo: boolean;
-  videoMaxSize: number;
-  imageMaxSize: number;
-  blacklist: string[];
-  whitelist: string[];
-  enablePagination: boolean;
-  itemsPerPage: number;
-  enableImageDuplicate: boolean; // 替换 enableDuplicate
-  imageDuplicateThreshold: number;
-  textDuplicateThreshold: number;
-  enableTextDuplicate: boolean;
-}
-
-// 消息构建工具
-// 清理元素数据用于保存
+/**
+ * 清理元素数据用于保存
+ * @param {Element[]} elements - 要清理的元素数组
+ * @param {boolean} [keepIndex=false] - 是否保留索引
+ * @returns {Element[]} 清理后的元素数组
+ */
 function cleanElementsForSave(elements: Element[], keepIndex: boolean = false): Element[] {
   if (!elements?.length) return [];
 

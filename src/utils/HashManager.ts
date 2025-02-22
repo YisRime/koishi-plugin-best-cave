@@ -34,16 +34,11 @@ interface HashStorageStatus {
  * 负责管理和维护回声洞图片的哈希值
  */
 export class HashManager {
-  // 哈希数据文件名
   private static readonly HASH_FILE = 'hash.json';
-  // 回声洞数据文件名
   private static readonly CAVE_FILE = 'cave.json';
-  // 批处理大小
   private static readonly BATCH_SIZE = 50;
-  // 存储回声洞ID到图片哈希值的映射
   private imageHashes = new Map<number, string[]>();
   private textHashes = new Map<number, string[]>();
-  // 初始化状态标志
   private initialized = false;
 
   /**
@@ -243,7 +238,6 @@ export class HashManager {
       similarity: number;
     } | null> = [];
 
-    // 处理图片查重
     if (content.images?.length) {
       const imageResults = await this.findImageDuplicates(content.images, thresholds.image);
       results.push(...imageResults.map(result =>
@@ -251,7 +245,6 @@ export class HashManager {
       ));
     }
 
-    // 处理文本查重
     if (content.texts?.length) {
       const textResults = await this.findTextDuplicates(content.texts, thresholds.text);
       results.push(...textResults.map(result =>
@@ -296,8 +289,6 @@ export class HashManager {
 
   private calculateTextSimilarity(hash1: string, hash2: string): number {
     if (hash1 === hash2) return 1;
-    // 实现一个简单的文本相似度算法
-    // 这里可以根据需要使用更复杂的算法
     const length = Math.max(hash1.length, hash2.length);
     let matches = 0;
     for (let i = 0; i < length; i++) {
@@ -306,21 +297,17 @@ export class HashManager {
     return matches / length;
   }
 
-  // 重命名原有的图片哈希相关方法
   private async findImageDuplicates(images: Buffer[], threshold: number): Promise<Array<{
     index: number;
     caveId: number;
     similarity: number;
   } | null>> {
-    // 确保存储已初始化
     if (!this.initialized) await this.initialize();
 
-    // 计算输入图片的哈希值
     const inputHashes = await Promise.all(
       images.map(buffer => ContentHasher.calculateHash(buffer))
     );
 
-    // 获取现有的所有哈希值
     const existingHashes = Array.from(this.imageHashes.entries());
 
     return Promise.all(
@@ -396,7 +383,6 @@ export class HashManager {
 
     for (const cave of caveData) {
       try {
-        // 处理图片哈希
         const imgElements = cave.elements?.filter(el => el.type === 'img' && el.file) || [];
         if (imgElements.length > 0) {
           const hashes = await Promise.all(
@@ -417,7 +403,6 @@ export class HashManager {
           }
         }
 
-        // 处理文本哈希
         const textElements = cave.elements?.filter(el => el.type === 'text' && (el as any).content) || [];
         if (textElements.length > 0) {
           const textHashes = textElements.map(el => ContentHasher.calculateTextHash((el as any).content));
@@ -486,7 +471,7 @@ export class HashManager {
     processor: (item: T) => Promise<void>,
     batchSize = HashManager.BATCH_SIZE
   ): Promise<void> {
-    // 按批次处理数组项，避免同时处理太多项导致内存问题
+
     for (let i = 0; i < items.length; i += batchSize) {
       const batch = items.slice(i, i + batchSize);
       await Promise.all(

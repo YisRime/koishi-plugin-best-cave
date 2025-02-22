@@ -86,7 +86,6 @@ export class FileHandler {
       }
       return results;
     } catch (error) {
-      // 并行执行所有回滚操作
       await Promise.all(
         operations
           .filter(({filePath}) => completed.has(filePath))

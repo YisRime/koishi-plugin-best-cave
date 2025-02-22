@@ -5,15 +5,35 @@ import { Config, Element, TextElement, MediaElement, CaveObject, PendingCave } f
 import { FileHandler } from './FileHandler'
 import { IdManager } from './IdManager'
 
+/**
+ * 管理洞审核相关操作的类
+ */
 export class AuditManager {
   private logger = new Logger('AuditManager')
 
+  /**
+   * 创建审核管理器实例
+   * @param ctx - Koishi 上下文
+   * @param config - 配置对象
+   * @param idManager - ID 管理器实例
+   */
   constructor(
     private ctx: Context,
     private config: Config,
     private idManager: IdManager
   ) {}
 
+  /**
+   * 处理审核操作
+   * @param pendingData - 待审核的洞数据数组
+   * @param isApprove - 是否通过审核
+   * @param caveFilePath - 洞数据文件路径
+   * @param resourceDir - 资源目录路径
+   * @param pendingFilePath - 待审核数据文件路径
+   * @param session - 会话对象
+   * @param targetId - 目标洞ID（可选）
+   * @returns 处理结果消息
+   */
   async processAudit(
     pendingData: PendingCave[],
     isApprove: boolean,
@@ -51,6 +71,18 @@ export class AuditManager {
     )
   }
 
+  /**
+   * 处理单条审核
+   * @param pendingData - 待审核的洞数据数组
+   * @param isApprove - 是否通过审核
+   * @param caveFilePath - 洞数据文件路径
+   * @param resourceDir - 资源目录路径
+   * @param pendingFilePath - 待审核数据文件路径
+   * @param targetId - 目标洞ID
+   * @param session - 会话对象
+   * @returns 处理结果消息
+   * @private
+   */
   private async handleSingleAudit(
     pendingData: PendingCave[],
     isApprove: boolean,
@@ -112,6 +144,17 @@ export class AuditManager {
     )
   }
 
+  /**
+   * 处理批量审核
+   * @param pendingData - 待审核的洞数据数组
+   * @param isApprove - 是否通过审核
+   * @param caveFilePath - 洞数据文件路径
+   * @param resourceDir - 资源目录路径
+   * @param pendingFilePath - 待审核数据文件路径
+   * @param session - 会话对象
+   * @returns 处理结果消息
+   * @private
+   */
   private async handleBatchAudit(
     pendingData: PendingCave[],
     isApprove: boolean,
@@ -166,6 +209,12 @@ export class AuditManager {
     ], false)
   }
 
+  /**
+   * 发送审核消息给管理员
+   * @param cave - 待审核的洞数据
+   * @param content - 消息内容
+   * @param session - 会话对象
+   */
   async sendAuditMessage(cave: PendingCave, content: string, session: any) {
     const auditMessage = `${session.text('commands.cave.audit.title')}\n${content}
 ${session.text('commands.cave.audit.from')}${cave.contributor_number}`
@@ -182,6 +231,12 @@ ${session.text('commands.cave.audit.from')}${cave.contributor_number}`
     }
   }
 
+  /**
+   * 删除媒体文件
+   * @param cave - 洞数据
+   * @param resourceDir - 资源目录路径
+   * @private
+   */
   private async deleteMediaFiles(cave: PendingCave, resourceDir: string) {
     if (cave.elements) {
       for (const element of cave.elements) {
@@ -195,6 +250,13 @@ ${session.text('commands.cave.audit.from')}${cave.contributor_number}`
     }
   }
 
+  /**
+   * 清理元素数据用于保存
+   * @param elements - 元素数组
+   * @param keepIndex - 是否保留索引
+   * @returns 清理后的元素数组
+   * @private
+   */
   private cleanElementsForSave(elements: Element[], keepIndex: boolean = false): Element[] {
     if (!elements?.length) return []
 
@@ -221,6 +283,16 @@ ${session.text('commands.cave.audit.from')}${cave.contributor_number}`
     return keepIndex ? cleanedElements.sort((a, b) => (a.index || 0) - (b.index || 0)) : cleanedElements
   }
 
+  /**
+   * 发送消息
+   * @param session - 会话对象
+   * @param key - 消息key
+   * @param params - 消息参数
+   * @param isTemp - 是否为临时消息
+   * @param timeout - 临时消息超时时间
+   * @returns 空字符串
+   * @private
+   */
   private async sendMessage(
     session: any,
     key: string,

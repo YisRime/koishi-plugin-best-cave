@@ -70,7 +70,7 @@ commands:
     error:
       noContent: "回声洞内容为空"
       getCave: "获取回声洞失败"
-      noCave: "没有回声洞"
+      noCave: "当前无回声洞"
       invalidId: "请输入有效的回声洞ID"
       notFound: "未找到该回声洞"
       exactDuplicateFound: "发现完全相同的"

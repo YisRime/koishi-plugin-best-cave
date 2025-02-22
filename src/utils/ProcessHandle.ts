@@ -15,7 +15,15 @@ interface CaveObject {
 
 interface PendingCave extends CaveObject {}
 
-// 处理列表查询
+/**
+ * 处理回声洞列表查询
+ * @param session - 会话对象
+ * @param config - 配置对象
+ * @param idManager - ID管理器实例
+ * @param userId - 可选的用户ID，用于筛选特定用户的回声洞
+ * @param pageNum - 页码，默认为1
+ * @returns 格式化后的回声洞列表字符串
+ */
 export async function processList(
   session: any,
   config: Config,
@@ -25,7 +33,6 @@ export async function processList(
 ): Promise<string> {
   const stats = idManager.getStats();
 
-  // 如果指定了用户ID，只返回该用户的统计信息
   if (userId && userId in stats) {
     const ids = stats[userId];
     return session.text('commands.cave.list.totalItems', [userId, ids.length]) + '\n' +
@@ -54,6 +61,15 @@ export async function processList(
   }
 }
 
+/**
+ * 查看指定ID的回声洞内容
+ * @param caveFilePath - 回声洞数据文件路径
+ * @param resourceDir - 资源文件目录路径
+ * @param session - 会话对象
+ * @param options - 命令选项
+ * @param content - 命令内容数组
+ * @returns 回声洞内容的格式化字符串
+ */
 export async function processView(
   caveFilePath: string,
   resourceDir: string,
@@ -69,6 +85,13 @@ export async function processView(
   return buildMessage(cave, resourceDir, session);
 }
 
+/**
+ * 随机获取一个回声洞
+ * @param caveFilePath - 回声洞数据文件路径
+ * @param resourceDir - 资源文件目录路径
+ * @param session - 会话对象
+ * @returns 随机回声洞的格式化字符串，如果没有可用的回声洞则返回错误消息
+ */
 export async function processRandom(
   caveFilePath: string,
   resourceDir: string,
@@ -90,6 +113,19 @@ export async function processRandom(
               : sendMessage(session, 'commands.cave.error.getCave', [], true);
 }
 
+/**
+ * 删除指定ID的回声洞
+ * @param caveFilePath - 回声洞数据文件路径
+ * @param resourceDir - 资源文件目录路径
+ * @param pendingFilePath - 待审核回声洞数据文件路径
+ * @param session - 会话对象
+ * @param config - 配置对象
+ * @param options - 命令选项
+ * @param content - 命令内容数组
+ * @param idManager - ID管理器实例
+ * @param HashManager - 哈希管理器实例
+ * @returns 删除操作的结果消息
+ */
 export async function processDelete(
   caveFilePath: string,
   resourceDir: string,
@@ -106,8 +142,6 @@ export async function processDelete(
 
   const data = await FileHandler.readJsonData<CaveObject>(caveFilePath);
   const pendingData = await FileHandler.readJsonData<PendingCave>(pendingFilePath);
-
-  // 根据 cave_id 查找而不是索引查找
   const targetInData = data.find(item => item.cave_id === caveId);
   const targetInPending = pendingData.find(item => item.cave_id === caveId);
 
@@ -118,18 +152,13 @@ export async function processDelete(
   const targetCave = targetInData || targetInPending;
   const isPending = !targetInData;
 
-  // 权限检查
   if (targetCave.contributor_number !== session.userId && !config.manager.includes(session.userId)) {
     return sendMessage(session, 'commands.cave.remove.noPermission', [], true);
   }
 
-  // 先生成回声洞预览消息
   const caveContent = await buildMessage(targetCave, resourceDir, session);
 
-  // 删除相关的媒体文件
   if (targetCave.elements) {
-
-    // 直接删除对应的哈希
     await HashManager.updateCaveContent(caveId, {
       images: undefined,
       texts: undefined
@@ -145,7 +174,6 @@ export async function processDelete(
     }
   }
 
-  // 从数组中移除目标对象
   if (isPending) {
     const newPendingData = pendingData.filter(item => item.cave_id !== caveId);
     await FileHandler.writeJsonData(pendingFilePath, newPendingData);
@@ -155,7 +183,6 @@ export async function processDelete(
     await idManager.removeStat(targetCave.contributor_number, caveId);
   }
 
-  // 标记 ID 为已删除
   await idManager.markDeleted(caveId);
 
   const deleteStatus = isPending

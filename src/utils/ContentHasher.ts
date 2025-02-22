@@ -13,24 +13,17 @@ export class ContentHasher {
    * @throws 当图片处理失败时可能抛出错误
    */
   static async calculateHash(imageBuffer: Buffer): Promise<string> {
-      // 转换为32x32灰度图以获得更好的特征
       const { data } = await sharp(imageBuffer)
         .grayscale()
         .resize(32, 32, { fit: 'fill' })
         .raw()
         .toBuffer({ resolveWithObject: true });
 
-      // 计算图像的DCT变换
       const dctMatrix = this.computeDCT(data, 32);
-
-      // 取左上角8x8区域作为低频特征
       const features = this.extractFeatures(dctMatrix, 32);
-
-      // 计算特征区域的中位数作为阈值
       const median = this.calculateMedian(features);
-
-      // 生成hash并转换为16进制
       const binaryHash = features.map(val => val > median ? '1' : '0').join('');
+
       return this.binaryToHex(binaryHash);
   }
 
@@ -42,7 +35,6 @@ export class ContentHasher {
    */
   private static binaryToHex(binary: string): string {
     const hex = [];
-    // 每4位二进制转换为1位16进制
     for (let i = 0; i < binary.length; i += 4) {
       const chunk = binary.slice(i, i + 4);
       hex.push(parseInt(chunk, 2).toString(16));
@@ -59,7 +51,6 @@ export class ContentHasher {
   private static hexToBinary(hex: string): string {
     let binary = '';
     for (const char of hex) {
-      // 将每个16进制字符转为4位二进制
       const bin = parseInt(char, 16).toString(2).padStart(4, '0');
       binary += bin;
     }
@@ -77,14 +68,12 @@ export class ContentHasher {
     const matrix: number[][] = Array(size).fill(0).map(() => Array(size).fill(0));
     const output: number[][] = Array(size).fill(0).map(() => Array(size).fill(0));
 
-    // 将1D数组转为2D矩阵
     for (let i = 0; i < size; i++) {
       for (let j = 0; j < size; j++) {
         matrix[i][j] = data[i * size + j];
       }
     }
 
-    // 计算2D DCT
     for (let u = 0; u < size; u++) {
       for (let v = 0; v < size; v++) {
         let sum = 0;
@@ -157,7 +146,6 @@ export class ContentHasher {
       throw new Error('Hash lengths must be equal');
     }
 
-    // 转换为二进制后计算距离
     const bin1 = this.hexToBinary(hash1);
     const bin2 = this.hexToBinary(hash2);
 
@@ -176,8 +164,6 @@ export class ContentHasher {
    */
   static calculateSimilarity(hash1: string, hash2: string): number {
     const distance = this.calculateDistance(hash1, hash2);
-    // 将汉明距离转换为0-1的相似度值
-    // 64位hash的最大汉明距离是64
     return (64 - distance) / 64;
   }
 
@@ -187,7 +173,6 @@ export class ContentHasher {
    * @returns 文本的哈希值(36进制字符串)
    */
   static calculateTextHash(text: string): string {
-    // 使用简单的文本规范化和hash算法
     const normalizedText = text.toLowerCase().trim().replace(/\s+/g, ' ');
     let hash = 0;
     for (let i = 0; i < normalizedText.length; i++) {

@@ -37,7 +37,6 @@ export class IdManager {
     if (this.initialized) return;
 
     try {
-      // 读取状态
       const status = fs.existsSync(this.statusFilePath) ?
         JSON.parse(await fs.promises.readFile(this.statusFilePath, 'utf8')) : {
           deletedIds: [],
@@ -46,21 +45,18 @@ export class IdManager {
           lastUpdated: new Date().toISOString()
         };
 
-      // 读取数据
       const [caveData, pendingData] = await Promise.all([
         FileHandler.readJsonData<CaveObject>(caveFilePath),
         FileHandler.readJsonData<PendingCave>(pendingFilePath)
       ]);
 
-      // 重置状态
       this.usedIds.clear();
       this.stats = {};
       const conflicts = new Map<number, Array<CaveObject | PendingCave>>();
 
-      // 处理ID冲突和构建统计
       for (const data of [caveData, pendingData]) {
         for (const item of data) {
-          // ID 冲突检查
+
           if (this.usedIds.has(item.cave_id)) {
             if (!conflicts.has(item.cave_id)) {
               conflicts.set(item.cave_id, []);
@@ -69,7 +65,6 @@ export class IdManager {
           } else {
             this.usedIds.add(item.cave_id);
 
-            // 只为正式数据构建统计
             if (data === caveData && item.contributor_number !== '10000') {
               if (!this.stats[item.contributor_number]) {
                 this.stats[item.contributor_number] = [];
@@ -80,12 +75,10 @@ export class IdManager {
         }
       }
 
-      // 处理冲突
       if (conflicts.size > 0) {
         await this.handleConflicts(conflicts, caveFilePath, pendingFilePath, caveData, pendingData);
       }
 
-      // 更新maxId，确保它不小于deletedIds中的最大值和已使用ID中的最大值
       this.maxId = Math.max(
         status.maxId || 0,
         ...[...this.usedIds],
@@ -93,7 +86,7 @@ export class IdManager {
         0
       );
 
-      // 检测ID空缺并添加到deletedIds
+      // 检测ID空缺
       this.deletedIds = new Set(status.deletedIds || []);
       for (let i = 1; i <= this.maxId; i++) {
         if (!this.usedIds.has(i)) {
@@ -101,7 +94,6 @@ export class IdManager {
         }
       }
 
-      // 保存更新后的状态
       await this.saveStatus();
       this.initialized = true;
       logger.success(`Cave ID Manager initialized with ${this.maxId}(-${this.deletedIds.size}) IDs`);
@@ -167,30 +159,24 @@ export class IdManager {
 
     let nextId: number;
 
-    // 首先尝试从已删除的ID中获取最小值
     if (this.deletedIds.size > 0) {
       const minDeletedId = Math.min(...Array.from(this.deletedIds));
       if (!isNaN(minDeletedId) && minDeletedId > 0) {
         nextId = minDeletedId;
         this.deletedIds.delete(nextId);
       } else {
-        // 如果已删除ID无效，则使用maxId + 1
         nextId = this.maxId + 1;
       }
     } else {
-      // 没有已删除的ID时，使用maxId + 1
       nextId = this.maxId + 1;
     }
 
-    // 确保ID为正整数且不重复
     while (isNaN(nextId) || nextId <= 0 || this.usedIds.has(nextId)) {
       nextId = this.maxId + 1;
       this.maxId++;
     }
 
     this.usedIds.add(nextId);
-
-    // 异步保存状态，但不等待完成
     this.saveStatus().catch(err =>
       logger.error(`Failed to save status after getNextId: ${err.message}`)
     );
@@ -211,7 +197,6 @@ export class IdManager {
     this.deletedIds.add(id);
     this.usedIds.delete(id);
 
-    // 更新maxId时同时考虑usedIds和deletedIds中的最大值
     const maxUsedId = Math.max(...Array.from(this.usedIds), 0);
     const maxDeletedId = Math.max(...Array.from(this.deletedIds), 0);
     this.maxId = Math.max(maxUsedId, maxDeletedId);
