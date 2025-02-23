@@ -102,17 +102,9 @@ export async function sendMessage(
  * @returns 图片路径或视频base64编码
  */
 export async function processMediaFile(filePath: string, type: 'image' | 'video'): Promise<string | null> {
-  try {
-    await fs.promises.access(filePath);
-    if (type === 'image') {
-      return filePath;
-    } else {
-      const data = await fs.promises.readFile(filePath);
-      return `data:${type}/mp4;base64,${data.toString('base64')}`;
-    }
-  } catch {
-    return null;
-  }
+  const data = await fs.promises.readFile(filePath).catch(() => null);
+  if (!data) return null;
+  return `data:${type}/${type === 'image' ? 'png' : 'mp4'};base64,${data.toString('base64')}`;
 }
 
 /**
