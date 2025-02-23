@@ -51,7 +51,10 @@ export async function buildMessage(cave: CaveObject, resourceDir: string, sessio
       lines.push(element.content);
     } else if (element.type === 'img' && element.file) {
       const filePath = path.join(resourceDir, element.file);
-      lines.push(h.image(filePath));
+      const base64Data = await processMediaFile(filePath, 'image');
+      if (base64Data) {
+        lines.push(h('image', { src: base64Data }));
+      }
     }
   }
 
