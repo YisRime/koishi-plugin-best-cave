@@ -1,7 +1,6 @@
 import { Context, Schema, Logger } from 'koishi'
 import * as fs from 'fs';
 import * as path from 'path';
-import {} from 'koishi-plugin-adapter-onebot'
 import { FileHandler } from './utils/FileHandler'
 import { IdManager } from './utils/IdManager'
 import { HashManager } from './utils/HashManager'
