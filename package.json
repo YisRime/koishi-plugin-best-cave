@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-best-cave",
   "description": "功能最强的 cave 插件，支持黑白名单、审核与自动查重，人性化的添加方式，可添加图文甚至视频，可查阅投稿列表，完善的 ID 管理与 Hash 校验机制，比你听过的任何 cave 都强！",
-  "version": "1.5.12",
+  "version": "1.6.0",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],
