@@ -17,7 +17,6 @@
     "dist"
   ],
   "license": "GPL-3.0",
-  "scripts": {},
   "keywords": [
     "chatbot",
     "koishi",
@@ -26,7 +25,6 @@
     "回声洞",
     "PCL"
   ],
-  "devDependencies": {},
   "peerDependencies": {
     "koishi": "^4.18.3",
     "sharp": "^0.33.5"
