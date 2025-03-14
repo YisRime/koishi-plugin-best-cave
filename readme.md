@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/koishi-plugin-best-cave?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-best-cave)
 
-功能最强的 cave 插件，支持黑白名单、审核与自动查重，人性化的添加方式，可添加图文甚至视频，可查阅投稿列表，完善的 ID 管理与 Hash 校验机制，比你听过的任何 cave 都强！
+回声洞，可自由添加内容（包括视频），具有可配置的 MD5/pHash 查重机制和可开关的审核系统，支持查阅投稿列表
 
 ## 功能亮点
 

@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-best-cave",
-  "description": "功能最强的 cave 插件，支持黑白名单、审核与自动查重，人性化的添加方式，可添加图文甚至视频，可查阅投稿列表，完善的 ID 管理与 Hash 校验机制，比你听过的任何 cave 都强！",
+  "description": "回声洞，可自由添加内容（包括视频），具有可配置的 MD5/pHash 查重机制和可开关的审核系统，支持查阅投稿列表",
   "version": "1.6.1",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
@@ -22,14 +22,11 @@
     "koishi",
     "plugin",
     "cave",
-    "回声洞",
-    "PCL"
+    "回声洞"
   ],
+  "devDependencies": {},
   "peerDependencies": {
     "koishi": "^4.18.3",
-    "sharp": "^0.33.5"
-  },
-  "dependencies": {
     "sharp": "^0.33.5"
   }
 }
