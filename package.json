@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-best-cave",
   "description": "回声洞，可自由添加内容（包括视频），具有可配置的 MD5/pHash 查重机制和可开关的审核系统，支持查阅投稿列表",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],
