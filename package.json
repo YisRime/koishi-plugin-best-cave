@@ -24,7 +24,6 @@
     "cave",
     "回声洞"
   ],
-  "devDependencies": {},
   "peerDependencies": {
     "koishi": "^4.18.3"
   },
