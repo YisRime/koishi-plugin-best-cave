@@ -77,6 +77,7 @@ export interface Config {
   enableProfile: boolean
   enableDataIO: boolean
   enableReview: boolean
+  caveFormat: string
   enableS3: boolean
   endpoint?: string
   region?: string
@@ -96,6 +97,7 @@ export const Config: Schema<Config> = Schema.intersect([
     enableProfile: Schema.boolean().default(false).description("启用自定义昵称"),
     enableDataIO: Schema.boolean().default(false).description("启用导入导出"),
     adminUsers: Schema.array(Schema.string()).default([]).description("管理员 ID 列表"),
+    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').required().description('自定义文本(使用|分隔)'),
   }).description("基础配置"),
   Schema.object({
     enableReview: Schema.boolean().default(false).description("启用审核"),

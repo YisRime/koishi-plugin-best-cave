@@ -77,13 +77,13 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const caveHElements = storedFormatToHElements(cave.elements);
 
   // 2. 并行处理所有媒体元素。
-  const processedElements = await Promise.all(caveHElements.map(element => {
+  const processedElements = await Promise.all(caveHElements.map(async (element) => {
     const isMedia = ['image', 'video', 'audio', 'file'].includes(element.type);
-    const fileName = element.attrs.src as string;
+    const fileName = element.attrs.src;
 
     // 如果不是媒体元素或没有 src，直接返回。
     if (!isMedia || !fileName) {
-      return Promise.resolve(element);
+      return element;
     }
 
     // 3. 如果启用了 S3 并配置了公共 URL，则拼接完整的 URL。
@@ -91,8 +91,7 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
       const fullUrl = config.publicUrl.endsWith('/')
         ? `${config.publicUrl}${fileName}`
         : `${config.publicUrl}/${fileName}`;
-      // 返回一个新的 h() 元素，更新 src 为 S3 公共 URL。
-      return Promise.resolve(h(element.type, { ...element.attrs, src: fullUrl }));
+      return h(element.type, { ...element.attrs, src: fullUrl });
     }
 
     // 4. 否则，将本地媒体文件转换为 Base64。
@@ -100,11 +99,43 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   }));
 
   // 5. 组装最终的消息数组，包含洞头、内容和洞尾。
-  return [
-    h('p', {}, `回声洞 ——（${cave.id}）`),
-    ...processedElements,
-    h('p', {}, `—— ${cave.userName}`),
-  ];
+  const finalMessage: (string | h)[] = [];
+  const formatString = config.caveFormat;
+  const separatorIndex = formatString.indexOf('|');
+
+  let headerFormat: string;
+  let footerFormat: string;
+
+  if (separatorIndex === -1) {
+    // 如果没有找到分隔符，则将整个字符串视为洞头。
+    headerFormat = formatString;
+    footerFormat = '';
+  } else {
+    // 否则，按分隔符分割。
+    headerFormat = formatString.substring(0, separatorIndex);
+    footerFormat = formatString.substring(separatorIndex + 1);
+  }
+
+  // 处理洞头，替换变量
+  const headerText = headerFormat
+    .replace('{id}', cave.id.toString())
+    .replace('{name}', cave.userName);
+  if (headerText.trim()) {
+    finalMessage.push(h('p', {}, headerText));
+  }
+
+  // 添加回声洞内容
+  finalMessage.push(...processedElements);
+
+  // 处理洞尾，替换变量
+  const footerText = footerFormat
+    .replace('{id}', cave.id.toString())
+    .replace('{name}', cave.userName);
+  if (footerText.trim()) {
+    finalMessage.push(h('p', {}, footerText));
+  }
+
+  return finalMessage;
 }
 
 /**
