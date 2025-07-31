@@ -97,7 +97,7 @@ export const Config: Schema<Config> = Schema.intersect([
     perChannel: Schema.boolean().default(false).description("启用分群模式"),
     enableProfile: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
-    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').required().description('自定义文本'),
+    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本'),
     adminUsers: Schema.array(Schema.string()).default([]).description("管理员 ID 列表"),
   }).description("基础配置"),
   Schema.object({
@@ -217,7 +217,7 @@ export function apply(ctx: Context, config: Config) {
         const scopeQuery = utils.getScopeQuery(session, config);
         const newId = await utils.getNextCaveId(ctx, scopeQuery);
         const finalElementsForDb: StoredElement[] = []; // 存储处理后待存入数据库的元素。
-        let mediaIndex = 1; // 媒体文件计数器，用于生成唯一文件名。
+        let mediaIndex = 0; // 媒体文件计数器，用于生成唯一文件名。
 
         // 递归函数，用于遍历处理消息中的所有 h() 元素。
         async function traverseAndProcess(elements: h[]) {
