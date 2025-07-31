@@ -71,13 +71,14 @@ declare module 'koishi' {
  * 插件的配置接口。
  */
 export interface Config {
-  cooldown: number
+  coolDown: number
   perChannel: boolean
   adminUsers: string[]
   enableProfile: boolean
-  enableDataIO: boolean
+  enableIO: boolean
   enableReview: boolean
   caveFormat: string
+  localPath?: string
   enableS3: boolean
   endpoint?: string
   region?: string
@@ -92,24 +93,25 @@ export interface Config {
  */
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    cooldown: Schema.number().default(10).description("冷却时间（秒）"),
+    coolDown: Schema.number().default(10).description("冷却时间（秒）"),
     perChannel: Schema.boolean().default(false).description("启用分群模式"),
     enableProfile: Schema.boolean().default(false).description("启用自定义昵称"),
-    enableDataIO: Schema.boolean().default(false).description("启用导入导出"),
+    enableIO: Schema.boolean().default(false).description("启用导入导出"),
+    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').required().description('自定义文本'),
     adminUsers: Schema.array(Schema.string()).default([]).description("管理员 ID 列表"),
-    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').required().description('自定义文本(使用|分隔)'),
   }).description("基础配置"),
   Schema.object({
     enableReview: Schema.boolean().default(false).description("启用审核"),
   }).description('审核配置'),
   Schema.object({
+    localPath: Schema.string().description('文件映射路径'),
     enableS3: Schema.boolean().default(false).description("启用 S3 存储"),
-    endpoint: Schema.string().required().description('端点 (Endpoint)'),
-    bucket: Schema.string().required().description('存储桶 (Bucket)'),
-    region: Schema.string().default('auto').description('区域 (Region)'),
     publicUrl: Schema.string().description('公共访问 URL').role('link'),
-    accessKeyId: Schema.string().required().description('Access Key ID').role('secret'),
-    secretAccessKey: Schema.string().required().description('Secret Access Key').role('secret'),
+    endpoint: Schema.string().description('端点 (Endpoint)').role('link'),
+    bucket: Schema.string().description('存储桶 (Bucket)'),
+    region: Schema.string().default('auto').description('区域 (Region)'),
+    accessKeyId: Schema.string().description('Access Key ID').role('secret'),
+    secretAccessKey: Schema.string().description('Secret Access Key').role('secret'),
   }).description("存储配置"),
 ]);
 
@@ -370,7 +372,7 @@ export function apply(ctx: Context, config: Config) {
     profileManager.registerCommands(cave);
   }
 
-  if (config.enableDataIO) {
+  if (config.enableIO) {
     dataManager = new DataManager(ctx, config, fileManager, logger);
     dataManager.registerCommands(cave);
   }

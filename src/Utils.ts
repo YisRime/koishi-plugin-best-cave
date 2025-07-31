@@ -65,7 +65,7 @@ export async function mediaElementToBase64(element: h, fileManager: FileManager,
 
 /**
  * 构建一条包含回声洞内容的完整消息，准备发送。
- * 此函数会处理 S3 URL 拼接或本地文件到 Base64 的转换。
+ * 此函数会处理 S3 URL、文件映射路径或本地文件到 Base64 的转换。
  * @param cave - 要展示的回声洞对象。
  * @param config - 插件配置。
  * @param fileManager - FileManager 实例。
@@ -73,67 +73,52 @@ export async function mediaElementToBase64(element: h, fileManager: FileManager,
  * @returns 一个包含 h() 元素和字符串的消息数组。
  */
 export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger): Promise<(string | h)[]> {
-  // 1. 将数据库格式转换为 h() 元素。
   const caveHElements = storedFormatToHElements(cave.elements);
 
-  // 2. 并行处理所有媒体元素。
-  const processedElements = await Promise.all(caveHElements.map(async (element) => {
+  const processedElements = await Promise.all(caveHElements.map(element => {
     const isMedia = ['image', 'video', 'audio', 'file'].includes(element.type);
-    const fileName = element.attrs.src;
+    const fileName = element.attrs.src as string;
 
-    // 如果不是媒体元素或没有 src，直接返回。
     if (!isMedia || !fileName) {
-      return element;
+      return Promise.resolve(element);
     }
 
-    // 3. 如果启用了 S3 并配置了公共 URL，则拼接完整的 URL。
+    // 如果启用了 S3 并配置了公共 URL，则拼接完整的 URL。
     if (config.enableS3 && config.publicUrl) {
       const fullUrl = config.publicUrl.endsWith('/')
         ? `${config.publicUrl}${fileName}`
         : `${config.publicUrl}/${fileName}`;
-      return h(element.type, { ...element.attrs, src: fullUrl });
+      return Promise.resolve(h(element.type, { ...element.attrs, src: fullUrl }));
     }
 
-    // 4. 否则，将本地媒体文件转换为 Base64。
+    // 如果配置了映射路径，则构建 file:// URI。
+    if (config.localPath) {
+      const mappedPath = path.join(config.localPath, fileName);
+      const fileUri = `file://${mappedPath}`;
+      return Promise.resolve(h(element.type, { ...element.attrs, src: fileUri }));
+    }
+
+    // 否则，将本地媒体文件转换为 Base64。
     return mediaElementToBase64(element, fileManager, logger);
   }));
 
-  // 5. 组装最终的消息数组，包含洞头、内容和洞尾。
+  // 根据 Config 拼接最终消息内容。
   const finalMessage: (string | h)[] = [];
   const formatString = config.caveFormat;
   const separatorIndex = formatString.indexOf('|');
-
-  let headerFormat: string;
-  let footerFormat: string;
-
+  let headerFormat: string, footerFormat: string;
   if (separatorIndex === -1) {
-    // 如果没有找到分隔符，则将整个字符串视为洞头。
     headerFormat = formatString;
     footerFormat = '';
   } else {
-    // 否则，按分隔符分割。
     headerFormat = formatString.substring(0, separatorIndex);
     footerFormat = formatString.substring(separatorIndex + 1);
   }
-
-  // 处理洞头，替换变量
-  const headerText = headerFormat
-    .replace('{id}', cave.id.toString())
-    .replace('{name}', cave.userName);
-  if (headerText.trim()) {
-    finalMessage.push(h('p', {}, headerText));
-  }
-
-  // 添加回声洞内容
+  const headerText = headerFormat.replace('{id}', cave.id.toString()).replace('{name}', cave.userName);
+  if (headerText.trim()) finalMessage.push(h('p', {}, headerText));
   finalMessage.push(...processedElements);
-
-  // 处理洞尾，替换变量
-  const footerText = footerFormat
-    .replace('{id}', cave.id.toString())
-    .replace('{name}', cave.userName);
-  if (footerText.trim()) {
-    finalMessage.push(h('p', {}, footerText));
-  }
+  const footerText = footerFormat.replace('{id}', cave.id.toString()).replace('{name}', cave.userName);
+  if (footerText.trim()) finalMessage.push(h('p', {}, footerText));
 
   return finalMessage;
 }
@@ -241,14 +226,14 @@ export async function downloadMedia(ctx: Context, fileManager: FileManager, url:
  */
 export function checkCooldown(session: Session, config: Config, lastUsed: Map<string, number>): string | null {
   // 如果冷却时间小于等于0，或不在群聊中，或用户是管理员，则不进行冷却检查。
-  if (config.cooldown <= 0 || !session.channelId || config.adminUsers.includes(session.userId)) {
+  if (config.coolDown <= 0 || !session.channelId || config.adminUsers.includes(session.userId)) {
     return null;
   }
   const now = Date.now();
   const lastTime = lastUsed.get(session.channelId) || 0; // 获取上次使用时间，如果没有则为0。
   // 检查时间差是否小于配置的冷却时间。
-  if (now - lastTime < config.cooldown * 1000) {
-    const waitTime = Math.ceil((config.cooldown * 1000 - (now - lastTime)) / 1000);
+  if (now - lastTime < config.coolDown * 1000) {
+    const waitTime = Math.ceil((config.coolDown * 1000 - (now - lastTime)) / 1000);
     return `指令冷却中，请在 ${waitTime} 秒后重试`;
   }
   return null;
@@ -262,7 +247,7 @@ export function checkCooldown(session: Session, config: Config, lastUsed: Map<st
  */
 export function updateCooldownTimestamp(session: Session, config: Config, lastUsed: Map<string, number>) {
   // 只有在冷却时间大于0且在群聊中时才更新时间戳。
-  if (config.cooldown > 0 && session.channelId) {
+  if (config.coolDown > 0 && session.channelId) {
     lastUsed.set(session.channelId, Date.now());
   }
 }

@@ -13,7 +13,6 @@ type PortableCaveObject = Omit<CaveObject, 'id'>;
  * 数据管理器 (DataManager)
  * @description
  * 负责处理回声洞数据的导入和导出功能。
- * 此类仅在插件配置中启用了 `enableDataIO` 时才会被实例化和使用。
  */
 export class DataManager {
   /**
