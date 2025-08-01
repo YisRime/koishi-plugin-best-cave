@@ -4,6 +4,7 @@ import { ProfileManager } from './ProfileManager'
 import { DataManager } from './DataManager'
 import { ReviewManager } from './ReviewManager'
 import * as utils from './Utils'
+import * as path from 'path';
 
 export const name = 'best-cave'
 export const inject = ['database']
@@ -33,7 +34,7 @@ const logger = new Logger('best-cave');
  * @property file - 文件标识符（本地文件名或 S3 Key），用于媒体类型。
  */
 export interface StoredElement {
-  type: 'text' | 'img' | 'video' | 'audio' | 'file';
+  type: 'text' | 'image' | 'video' | 'audio' | 'file';
   content?: string;
   file?: string;
 }
@@ -193,10 +194,6 @@ export function apply(ctx: Context, config: Config) {
   cave.subcommand('.add [content:text]', '添加回声洞')
     .usage('添加一条回声洞。可以直接发送内容，也可以回复或引用一条消息。')
     .action(async ({ session }, content) => {
-      // 在添加新洞前，执行一次清理，移除被标记为删除的旧洞。
-      utils.cleanupPendingDeletions(ctx, fileManager, logger);
-
-      const savedFileIdentifiers: string[] = []; // 存储本次操作中保存的文件名，用于失败时回滚。
       try {
         let sourceElements: h[]; // 用来存储源消息的 h() 元素数组。
 
@@ -216,37 +213,8 @@ export function apply(ctx: Context, config: Config) {
 
         const scopeQuery = utils.getScopeQuery(session, config);
         const newId = await utils.getNextCaveId(ctx, scopeQuery);
-        const finalElementsForDb: StoredElement[] = []; // 存储处理后待存入数据库的元素。
-        let mediaIndex = 0; // 媒体文件计数器，用于生成唯一文件名。
 
-        // 递归函数，用于遍历处理消息中的所有 h() 元素。
-        async function traverseAndProcess(elements: h[]) {
-          for (const el of elements) {
-            // 将 'image' 类型统一为 'img' 以匹配 StoredElement 类型。
-            const elementType = (el.type === 'image' ? 'img' : el.type) as StoredElement['type'];
-
-            // 处理媒体元素
-            if (['img', 'video', 'audio', 'file'].includes(elementType) && el.attrs.src) {
-              let fileIdentifier = el.attrs.src as string;
-              // 如果 src 是网络链接，则下载。
-              if (fileIdentifier.startsWith('http')) {
-                mediaIndex++;
-                const originalName = el.attrs.file as string;
-                const savedId = await utils.downloadMedia(ctx, fileManager, fileIdentifier, originalName, elementType, newId, mediaIndex, session.channelId, session.userId);
-                savedFileIdentifiers.push(savedId);
-                fileIdentifier = savedId; // 更新文件标识符为保存后的名称。
-              }
-              finalElementsForDb.push({ type: elementType, file: fileIdentifier });
-            } else if (elementType === 'text' && el.attrs.content?.trim()) {
-              // 处理文本元素，忽略纯空白内容。
-              finalElementsForDb.push({ type: 'text', content: el.attrs.content.trim() });
-            }
-            // 递归处理子元素。
-            if (el.children) await traverseAndProcess(el.children);
-          }
-        }
-
-        await traverseAndProcess(sourceElements);
+        const { finalElementsForDb, mediaToDownload } = await utils.prepareElementsForStorage(sourceElements, newId, session.channelId, session.userId);
 
         if (finalElementsForDb.length === 0) return "内容为空，已取消添加";
 
@@ -266,22 +234,29 @@ export function apply(ctx: Context, config: Config) {
           status: config.enableReview ? 'pending' : 'active',
           time: new Date(),
         };
+
         await ctx.database.create('cave', newCave);
 
-        // 如果需要审核，则发送通知给管理员。
+        try {
+          const downloadPromises = mediaToDownload.map(async (media) => {
+            const response = await ctx.http.get(media.url, { responseType: 'arraybuffer', timeout: 30000 });
+            await fileManager.saveFile(media.fileName, Buffer.from(response));
+          });
+          await Promise.all(downloadPromises);
+        } catch (fileError) {
+          // 如果文件存储失败，回滚操作：删除已创建的数据库记录
+          await ctx.database.remove('cave', { id: newId });
+          throw fileError;
+        }
+
+        // 6. 操作成功
         if (newCave.status === 'pending') {
           reviewManager.sendForReview(newCave);
           return `提交成功，序号为（${newCave.id}）`;
         }
-
         return `添加成功，序号为（${newId}）`;
       } catch (error) {
         logger.error('添加回声洞失败:', error);
-        // 如果在处理过程中已经保存了文件，但最终失败了，则删除这些“孤儿”文件。
-        if (savedFileIdentifiers.length > 0) {
-          logger.info(`添加失败，回滚并删除 ${savedFileIdentifiers.length} 个文件...`);
-          await Promise.all(savedFileIdentifiers.map(fileId => fileManager.deleteFile(fileId)));
-        }
         return '添加失败，请稍后再试';
       }
     });
@@ -328,18 +303,18 @@ export function apply(ctx: Context, config: Config) {
           return '抱歉，你没有权限删除这条回声洞';
         }
 
-        // 先将状态标记为 'delete'，然后由清理任务来异步删除文件和记录。
-        // 这样做可以避免在删除文件时阻塞当前命令的响应。
+        // 先获取要返回给用户的消息内容
+        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
+
+        // 然后，将状态标记为 'delete'
         await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
 
-        // 立即触发一次清理，以便用户能尽快看到结果。
+        // 立即向用户返回“已删除”的确认消息
+        session.send([`已删除`, ...caveMessage]);
+
+        // 最后，在后台异步触发一次清理任务，不阻塞当前流程
         utils.cleanupPendingDeletions(ctx, fileManager, logger);
 
-        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
-        return [
-          h('p', {}, `以下内容已删除`),
-          ...caveMessage,
-        ];
       } catch (error) {
         logger.error(`标记回声洞（${id}）失败:`, error);
         return '删除失败，请稍后再试';

@@ -112,10 +112,7 @@ export class ReviewManager {
     const caveContent = await buildCaveMessage(cave, this.config, this.fileManager, this.logger);
 
     // 在内容上包裹审核提示信息。
-    return [
-      h('p', `以下内容待审核：`),
-      ...caveContent,
-    ];
+    return [`待审核`, ...caveContent];
   }
 
   /**
@@ -147,7 +144,7 @@ export class ReviewManager {
       // 拒绝时，最好将内容也广播给其他管理员，让他们知晓被拒绝的内容是什么。
       const caveContent = await buildCaveMessage(cave, this.config, this.fileManager, this.logger);
       broadcastMessage = [
-        h('p', `回声洞（${caveId}）已由管理员 "${adminUserName}" 拒绝`),
+        `回声洞（${caveId}）已由管理员 "${adminUserName}" 拒绝`,
         ...caveContent
       ];
     }

@@ -25,9 +25,7 @@ export function storedFormatToHElements(elements: StoredElement[]): h[] {
     switch (el.type) {
       case 'text':
         return h.text(el.content);
-      case 'img':
-        // img 标签在 Koishi 中通常用 'image' 类型。
-        return h('image', { src: el.file });
+      case 'image':
       case 'video':
       case 'audio':
       case 'file':
@@ -59,7 +57,7 @@ export async function mediaElementToBase64(element: h, fileManager: FileManager,
   } catch (error) {
     logger.warn(`转换本地文件 ${fileName} 为 Base64 失败:`, error);
     // 转换失败时，返回一个纯文本提示，避免消息发送中断。
-    return h('p', {}, `[${element.type}]`);
+    return h.text(`[${element.type}]`);
   }
 }
 
@@ -115,12 +113,62 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
     footerFormat = formatString.substring(separatorIndex + 1);
   }
   const headerText = headerFormat.replace('{id}', cave.id.toString()).replace('{name}', cave.userName);
-  if (headerText.trim()) finalMessage.push(h('p', {}, headerText));
+  if (headerText.trim()) finalMessage.push(headerText);
   finalMessage.push(...processedElements);
   const footerText = footerFormat.replace('{id}', cave.id.toString()).replace('{name}', cave.userName);
-  if (footerText.trim()) finalMessage.push(h('p', {}, footerText));
+  if (footerText.trim()) finalMessage.push(footerText);
 
   return finalMessage;
+}
+
+/**
+ * 遍历消息元素，将其转换为可存储的格式，并识别需要下载的媒体文件。
+ * @param sourceElements - 源消息中的 h() 元素数组。
+ * @param newId - 新回声洞的 ID。
+ * @param channelId - 频道 ID。
+ * @param userId - 用户 ID。
+ * @returns 包含待存储元素和待下载媒体列表的对象。
+ */
+export async function prepareElementsForStorage(sourceElements: h[], newId: number, channelId: string, userId: string): Promise<{ finalElementsForDb: StoredElement[], mediaToDownload: { url: string, fileName: string }[] }> {
+  const finalElementsForDb: StoredElement[] = [];
+  const mediaToDownload: { url: string; fileName: string }[] = [];
+  let mediaIndex = 0;
+
+  // 使用一个栈（stack）来进行迭代式深度优先遍历，避免递归
+  const stack = [...sourceElements].reverse(); // 反转数组，以便 pop() 后能按原顺序处理
+
+  while (stack.length > 0) {
+    const el = stack.pop();
+    const elementType = el.type as StoredElement['type'];
+
+    // 优先处理子元素，将其反转后推入栈顶，以保持正确的遍历顺序
+    if (el.children) {
+      stack.push(...[...el.children].reverse());
+    }
+
+    // 处理媒体元素
+    if (['image', 'video', 'audio', 'file'].includes(elementType) && el.attrs.src) {
+      const fileIdentifier = el.attrs.src as string;
+      if (fileIdentifier.startsWith('http')) {
+        mediaIndex++;
+        const originalName = el.attrs.file as string;
+        const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
+        const ext = originalName ? path.extname(originalName) : '';
+        const finalExt = ext || defaultExtMap[elementType] || '.dat';
+        const generatedFileName = `${newId}_${mediaIndex}_${channelId}_${userId}${finalExt}`;
+
+        finalElementsForDb.push({ type: elementType, file: generatedFileName });
+        mediaToDownload.push({ url: fileIdentifier, fileName: generatedFileName });
+      } else {
+        finalElementsForDb.push({ type: elementType, file: fileIdentifier });
+      }
+    } else if (elementType === 'text' && el.attrs.content?.trim()) {
+      // 处理文本元素，忽略纯空白内容
+      finalElementsForDb.push({ type: 'text', content: el.attrs.content.trim() });
+    }
+  }
+
+  return { finalElementsForDb, mediaToDownload };
 }
 
 /**
@@ -204,7 +252,7 @@ export async function getNextCaveId(ctx: Context, query: object = {}): Promise<n
  */
 export async function downloadMedia(ctx: Context, fileManager: FileManager, url: string, originalName: string, type: string, caveId: number, index: number, channelId: string, userId: string): Promise<string> {
   // 默认扩展名映射。
-  const defaultExtMap = { 'img': '.jpg', 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
+  const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
   // 优先使用原始文件名中的扩展名，否则根据类型使用默认扩展名。
   const ext = originalName ? path.extname(originalName) : '';
   const finalExt = ext || defaultExtMap[type] || '.dat';
