@@ -1,7 +1,5 @@
-// --- START OF FILE index.ts ---
-
 import { Context, Schema, Logger, h } from 'koishi'
-import * as path from 'path' // 引入 path 模块
+import * as path from 'path'
 import { FileManager } from './FileManager'
 import { ProfileManager } from './ProfileManager'
 import { DataManager } from './DataManager'
@@ -62,7 +60,7 @@ declare module 'koishi' {
 export interface Config {
   coolDown: number;
   perChannel: boolean;
-  adminUsers: string[];
+  adminChannel: string;
   enableProfile: boolean;
   enableIO: boolean;
   enableReview: boolean;
@@ -83,8 +81,8 @@ export const Config: Schema<Config> = Schema.intersect([
     perChannel: Schema.boolean().default(false).description("启用分群模式"),
     enableProfile: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
+    adminChannel: Schema.string().description("管理群组 ID"),
     caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本'),
-    adminUsers: Schema.array(Schema.string()).default([]).description("管理员 ID 列表"),
   }).description("基础配置"),
   Schema.object({
     enableReview: Schema.boolean().default(false).description("启用审核"),
@@ -304,8 +302,8 @@ export function apply(ctx: Context, config: Config) {
       try {
         const [targetCave] = await ctx.database.get('cave', { id, status: 'active' });
         if (!targetCave) return `回声洞（${id}）不存在`;
-        if (targetCave.userId !== session.userId && !config.adminUsers.includes(session.userId)) {
-          return '抱歉，你没有权限删除这条回声洞';
+        if (targetCave.userId !== session.userId && session.channelId !== config.adminChannel) {
+          return '你没有权限删除这条回声洞';
         }
 
         // 先将状态标记为 'delete'，以防文件被清理前消息发送失败

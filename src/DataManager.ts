@@ -10,8 +10,7 @@ type PortableCaveObject = Omit<CaveObject, 'id'>;
 
 /**
  * @class DataManager
- * @description
- * 负责处理回声洞数据的导入和导出功能。
+ * @description 负责处理回声洞数据的导入和导出功能。
  */
 export class DataManager {
   /**
@@ -37,7 +36,7 @@ export class DataManager {
     cave.subcommand('.export', '导出回声洞数据')
       .usage('将所有回声洞数据导出到 cave_export.json。')
       .action(async ({ session }) => {
-        if (!this.config.adminUsers.includes(session.userId)) return '抱歉，你没有权限导出数据';
+        if (session.channelId !== this.config.adminChannel) return '此指令仅限在管理群组中使用';
         try {
           await session.send('正在导出数据，请稍候...');
           return await this.exportData();
@@ -51,7 +50,7 @@ export class DataManager {
     cave.subcommand('.import', '导入回声洞数据')
       .usage('从 cave_import.json 中导入回声洞数据。')
       .action(async ({ session }) => {
-        if (!this.config.adminUsers.includes(session.userId)) return '抱歉，你没有权限导入数据';
+        if (session.channelId !== this.config.adminChannel) return '此指令仅限在管理群组中使用';
         try {
           await session.send('正在导入数据，请稍候...');
           return await this.importData();
@@ -95,13 +94,13 @@ export class DataManager {
 
     let successCount = 0;
     for (const cave of importedCaves) {
-      // 注意: 此处逐条获取ID，在导入大量数据时可能有效率问题，但能确保ID的唯一性和连续性。
+      // 逐条获取ID，在导入大量数据时可能有效率问题，但能确保ID的唯一性和连续性。
       const newId = await getNextCaveId(this.ctx, {});
       const newCave: CaveObject = {
         ...cave,
         id: newId,
         channelId: cave.channelId || null, // 保证 channelId 存在
-        status: 'active', // 导入的数据直接设为活跃状态
+        status: 'active',
       };
       await this.ctx.database.create('cave', newCave);
       successCount++;

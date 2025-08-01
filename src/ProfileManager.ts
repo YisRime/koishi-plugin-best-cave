@@ -19,8 +19,7 @@ declare module 'koishi' {
 
 /**
  * @class ProfileManager
- * @description
- * 负责管理用户在回声洞中的自定义昵称。
+ * @description 负责管理用户在回声洞中的自定义昵称。
  * 当插件配置 `enableProfile` 为 true 时实例化。
  */
 export class ProfileManager {

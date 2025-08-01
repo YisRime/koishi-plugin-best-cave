@@ -6,8 +6,7 @@ import { Config } from './index'
 
 /**
  * @class FileManager
- * @description
- * 封装了对文件的存储、读取和删除操作。
+ * @description 封装了对文件的存储、读取和删除操作。
  * 能根据配置自动选择使用本地文件系统或 AWS S3 作为存储后端。
  * 内置 Promise 文件锁，防止本地文件的并发写入冲突。
  */

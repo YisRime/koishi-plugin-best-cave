@@ -146,7 +146,7 @@ export async function downloadMedia(ctx: Context, fileManager: FileManager, url:
  * @returns 若在冷却中则返回提示字符串，否则返回 null。
  */
 export function checkCooldown(session: Session, config: Config, lastUsed: Map<string, number>): string | null {
-  if (config.coolDown <= 0 || !session.channelId || config.adminUsers.includes(session.userId)) return null;
+  if (config.coolDown <= 0 || !session.channelId) return null;
   const now = Date.now();
   const lastTime = lastUsed.get(session.channelId) || 0;
   if (now - lastTime < config.coolDown * 1000) {
