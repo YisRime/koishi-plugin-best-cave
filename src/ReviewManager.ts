@@ -30,7 +30,8 @@ export class ReviewManager {
     cave.subcommand('.review [id:posint] [action:string]', '审核回声洞')
       .usage('查看或审核回声洞，使用 <Y/N> 进行审核。')
       .action(async ({ session }, id, action) => {
-        if (session.channelId !== this.config.adminChannel) return '此指令仅限在管理群组中使用';
+        const adminChannelId = this.config.adminChannel ? this.config.adminChannel.split(':')[1] : null;
+        if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
 
         if (!id) {
           const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' });
@@ -61,9 +62,10 @@ export class ReviewManager {
    * @param cave 新创建的、状态为 'pending' 的回声洞对象。
    */
   public async sendForReview(cave: CaveObject): Promise<void> {
-    // 检查是否配置了管理群
-    if (!this.config.adminChannel) {
-      this.logger.warn(`未配置管理群组，已自动通过回声洞（${cave.id}）`);
+    const channelParts = this.config.adminChannel?.split(':');
+
+    if (!channelParts || channelParts.length < 2 || !channelParts[1]) {
+      this.logger.warn(`管理群组配置无效，已自动通过回声洞（${cave.id}）`);
       await this.ctx.database.upsert('cave', [{ id: cave.id, status: 'active' }]);
       return;
     }

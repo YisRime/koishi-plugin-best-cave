@@ -36,7 +36,8 @@ export class DataManager {
     cave.subcommand('.export', '导出回声洞数据')
       .usage('将所有回声洞数据导出到 cave_export.json。')
       .action(async ({ session }) => {
-        if (session.channelId !== this.config.adminChannel) return '此指令仅限在管理群组中使用';
+        const adminChannelId = this.config.adminChannel ? this.config.adminChannel.split(':')[1] : null;
+        if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
         try {
           await session.send('正在导出数据，请稍候...');
           return await this.exportData();
@@ -50,7 +51,8 @@ export class DataManager {
     cave.subcommand('.import', '导入回声洞数据')
       .usage('从 cave_import.json 中导入回声洞数据。')
       .action(async ({ session }) => {
-        if (session.channelId !== this.config.adminChannel) return '此指令仅限在管理群组中使用';
+        const adminChannelId = this.config.adminChannel ? this.config.adminChannel.split(':')[1] : null;
+        if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
         try {
           await session.send('正在导入数据，请稍候...');
           return await this.importData();
@@ -99,7 +101,7 @@ export class DataManager {
       const newCave: CaveObject = {
         ...cave,
         id: newId,
-        channelId: cave.channelId || null, // 保证 channelId 存在
+        channelId: cave.channelId,
         status: 'active',
       };
       await this.ctx.database.create('cave', newCave);

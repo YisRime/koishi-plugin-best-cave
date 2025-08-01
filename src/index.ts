@@ -44,7 +44,7 @@ export interface CaveObject {
   channelId: string;
   userId: string;
   userName: string;
-  status: 'active' | 'delete' | 'pending'; // 活跃、待删除、待审核
+  status: 'active' | 'delete' | 'pending' | 'preload';
   time: Date;
 }
 
@@ -81,7 +81,7 @@ export const Config: Schema<Config> = Schema.intersect([
     perChannel: Schema.boolean().default(false).description("启用分群模式"),
     enableProfile: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
-    adminChannel: Schema.string().description("管理群组 ID"),
+    adminChannel: Schema.string().default('onebot:').description("管理群组 ID"),
     caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本'),
   }).description("基础配置"),
   Schema.object({
@@ -138,13 +138,11 @@ export function apply(ctx: Context, config: Config) {
 
       try {
         const query = utils.getScopeQuery(session, config);
-        // 仅获取ID以提高性能
         const candidates = await ctx.database.get('cave', query, { fields: ['id'] });
         if (candidates.length === 0) {
           return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
         }
 
-        // 随机抽取并获取完整数据
         const randomId = candidates[Math.floor(Math.random() * candidates.length)].id;
         const [randomCave] = await ctx.database.get('cave', { ...query, id: randomId });
 
@@ -163,7 +161,6 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session }, content) => {
       try {
         let sourceElements: h[];
-        // 优先使用引用消息，其次是指令内容，最后提示用户输入
         if (session.quote?.elements) {
           sourceElements = session.quote.elements;
         } else if (content?.trim()) {
@@ -175,102 +172,58 @@ export function apply(ctx: Context, config: Config) {
           sourceElements = h.parse(reply);
         }
 
-        // 为获取下一个可用ID创建一个查询，此查询需包含所有状态的洞（active, pending等），以避免ID冲突
         const idScopeQuery = {};
         if (config.perChannel && session.channelId) {
           idScopeQuery['channelId'] = session.channelId;
         }
         const newId = await utils.getNextCaveId(ctx, idScopeQuery);
 
-        const finalElementsForDb: StoredElement[] = [];
-        const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
-        let mediaIndex = 0; // 媒体文件计数器
-
-        // 定义从 Koishi 元素类型到数据库存储类型的映射
-        const typeMap: Record<string, StoredElement['type']> = {
-          'img': 'image',
-          'image': 'image',
-          'video': 'video',
-          'audio': 'audio',
-          'file': 'file',
-          'text': 'text'
-        };
-
-        // 递归处理消息元素，生成文件名但不立即保存
-        async function traverseAndProcess(elements: h[]) {
-          for (const el of elements) {
-            const normalizedType = typeMap[el.type]; // 使用映射获取标准类型
-
-            if (!normalizedType) {
-              if (el.children) await traverseAndProcess(el.children);
-              continue;
-            }
-
-            // 处理媒体文件
-            if (['image', 'video', 'audio', 'file'].includes(normalizedType) && el.attrs.src) {
-              let fileIdentifier = el.attrs.src as string;
-              // 如果 src 是网络链接，则生成文件名并加入待下载列表
-              if (fileIdentifier.startsWith('http')) {
-                mediaIndex++;
-                const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
-                // 优先使用元素自带的文件名来获取扩展名，否则使用默认值
-                const ext = el.attrs.file && path.extname(el.attrs.file as string)
-                  ? path.extname(el.attrs.file as string)
-                  : (defaultExtMap[normalizedType] || '.dat');
-                const channelIdentifier = session.channelId || 'private';
-                const fileName = `${newId}_${mediaIndex}_${channelIdentifier}_${session.userId}${ext}`;
-                mediaToSave.push({ sourceUrl: fileIdentifier, fileName: fileName });
-                fileIdentifier = fileName;
-              }
-              finalElementsForDb.push({ type: normalizedType, file: fileIdentifier });
-            } else if (normalizedType === 'text' && el.attrs.content?.trim()) {
-              finalElementsForDb.push({ type: 'text', content: el.attrs.content.trim() });
-            }
-
-            // 递归处理子元素
-            if (el.children) {
-              await traverseAndProcess(el.children);
-            }
-          }
-        }
-
-        await traverseAndProcess(sourceElements);
+        // 使用工具函数处理消息元素
+        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(
+          sourceElements, newId, session.channelId, session.userId
+        );
 
         if (finalElementsForDb.length === 0) return "内容为空，已取消添加";
 
-        // 若启用昵称功能，获取并使用自定义昵称
         const customNickname = config.enableProfile ? await profileManager.getNickname(session.userId) : null;
+        const userName = customNickname || session.username;
 
-        const newCave: CaveObject = {
-          id: newId,
-          elements: finalElementsForDb,
-          channelId: session.channelId,
-          userId: session.userId,
-          userName: customNickname || session.username,
-          status: config.enableReview ? 'pending' : 'active',
-          time: new Date(),
-        };
+        // 根据是否有媒体文件来决定处理流程
+        if (mediaToSave.length > 0) {
+          const newCave: CaveObject = {
+            id: newId,
+            elements: finalElementsForDb,
+            channelId: session.channelId,
+            userId: session.userId,
+            userName,
+            status: 'preload',
+            time: new Date(),
+          };
+          await ctx.database.create('cave', newCave);
 
-        // 先创建数据库条目
-        await ctx.database.create('cave', newCave);
+          // 异步处理文件上传和状态更新
+          utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave);
 
-        // 然后下载并保存所有媒体文件
-        try {
-          await Promise.all(mediaToSave.map(async (media) => {
-            const response = await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 });
-            await fileManager.saveFile(media.fileName, Buffer.from(response));
-          }));
-        } catch (fileSaveError) {
-          logger.error(`文件保存失败:`, fileSaveError);
-          await ctx.database.remove('cave', { id: newId });
-          throw fileSaveError;
+          return config.enableReview ? `提交成功，序号为（${newId}）` : `添加成功，序号为（${newId}）`;
+        } else {
+          const finalStatus = config.enableReview ? 'pending' : 'active';
+          const newCave: CaveObject = {
+            id: newId,
+            elements: finalElementsForDb,
+            channelId: session.channelId,
+            userId: session.userId,
+            userName,
+            status: finalStatus,
+            time: new Date(),
+          };
+          await ctx.database.create('cave', newCave);
+
+          if (finalStatus === 'pending') {
+            reviewManager.sendForReview(newCave);
+            return `提交成功，序号为（${newId}）`;
+          }
+          return `添加成功，序号为（${newId}）`;
         }
-
-        if (newCave.status === 'pending') {
-          reviewManager.sendForReview(newCave);
-          return `提交成功，序号为（${newCave.id}）`;
-        }
-        return `添加成功，序号为（${newId}）`;
       } catch (error) {
         logger.error('添加回声洞失败:', error);
         return '添加失败，请稍后再试';
@@ -302,15 +255,12 @@ export function apply(ctx: Context, config: Config) {
       try {
         const [targetCave] = await ctx.database.get('cave', { id, status: 'active' });
         if (!targetCave) return `回声洞（${id}）不存在`;
-        if (targetCave.userId !== session.userId && session.channelId !== config.adminChannel) {
+        const adminChannelId = config.adminChannel ? config.adminChannel.split(':')[1] : null;
+        if (targetCave.userId !== session.userId && session.channelId !== adminChannelId) {
           return '你没有权限删除这条回声洞';
         }
-
-        // 先将状态标记为 'delete'，以防文件被清理前消息发送失败
         await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
-        // 在触发后台清理前，先构建好消息
         const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
-        // 异步触发清理，不阻塞当前响应
         utils.cleanupPendingDeletions(ctx, fileManager, logger);
         return [`已删除`, ...caveMessage];
       } catch (error) {

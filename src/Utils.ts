@@ -64,12 +64,16 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const replacements = { id: cave.id.toString(), name: cave.userName };
 
   const headerText = headerFormat.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]);
-  if (headerText.trim()) finalMessage.push(headerText);
+  if (headerText.trim()) {
+    finalMessage.push(headerText.trim() + '\n');
+  }
 
   finalMessage.push(...processedElements);
 
   const footerText = footerFormat.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]);
-  if (footerText.trim()) finalMessage.push(footerText);
+  if (footerText.trim()) {
+    finalMessage.push('\n' + footerText.trim());
+  }
 
   return finalMessage;
 }
@@ -162,5 +166,88 @@ export function checkCooldown(session: Session, config: Config, lastUsed: Map<st
 export function updateCooldownTimestamp(session: Session, config: Config, lastUsed: Map<string, number>) {
   if (config.coolDown > 0 && session.channelId) {
     lastUsed.set(session.channelId, Date.now());
+  }
+}
+
+/**
+ * @description 解析消息元素，分离出文本和待下载的媒体文件。
+ * @param sourceElements - 原始的 Koishi 消息元素数组。
+ * @param newId - 这条回声洞的新 ID。
+ * @param channelId - 频道 ID。
+ * @param userId - 用户 ID。
+ * @returns 一个包含数据库元素和待保存媒体列表的对象。
+ */
+export async function processMessageElements(sourceElements: h[], newId: number, channelId: string, userId: string): Promise<{
+  finalElementsForDb: StoredElement[],
+  mediaToSave: { sourceUrl: string, fileName: string }[]
+}> {
+  const finalElementsForDb: StoredElement[] = [];
+  const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
+  let mediaIndex = 0;
+
+  const typeMap: Record<string, StoredElement['type']> = {
+    'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text'
+  };
+
+  async function traverse(elements: h[]) {
+    for (const el of elements) {
+      const normalizedType = typeMap[el.type];
+      if (!normalizedType) {
+        if (el.children) await traverse(el.children);
+        continue;
+      }
+      if (['image', 'video', 'audio', 'file'].includes(normalizedType) && el.attrs.src) {
+        let fileIdentifier = el.attrs.src as string;
+        if (fileIdentifier.startsWith('http')) {
+          mediaIndex++;
+          const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
+          const ext = el.attrs.file && path.extname(el.attrs.file as string) ? path.extname(el.attrs.file as string) : (defaultExtMap[normalizedType] || '.dat');
+          const channelIdentifier = channelId || 'private';
+          const fileName = `${newId}_${mediaIndex}_${channelIdentifier}_${userId}${ext}`;
+          mediaToSave.push({ sourceUrl: fileIdentifier, fileName: fileName });
+          fileIdentifier = fileName;
+        }
+        finalElementsForDb.push({ type: normalizedType, file: fileIdentifier });
+      } else if (normalizedType === 'text' && el.attrs.content?.trim()) {
+        finalElementsForDb.push({ type: 'text', content: el.attrs.content.trim() });
+      }
+      if (el.children) {
+        await traverse(el.children);
+      }
+    }
+  }
+
+  await traverse(sourceElements);
+  return { finalElementsForDb, mediaToSave };
+}
+
+/**
+ * @description 异步处理文件上传和状态更新的后台任务。
+ * @param ctx - Koishi 上下文。
+ * @param config - 插件配置。
+ * @param fileManager - 文件管理器实例。
+ * @param logger - 日志记录器实例。
+ * @param reviewManager - 审核管理器实例 (可能为 null)。
+ * @param cave - 已创建的、状态为 'preload' 的回声洞对象。
+ * @param mediaToSave - 需要下载和保存的媒体文件列表。
+ */
+export async function handleFileUploads(ctx: Context, config: Config, fileManager: FileManager, logger: Logger, reviewManager: any, cave: CaveObject, mediaToSave: { sourceUrl: string, fileName: string }[]) {
+  try {
+    await Promise.all(mediaToSave.map(async (media) => {
+      const response = await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 });
+      await fileManager.saveFile(media.fileName, Buffer.from(response));
+    }));
+
+    const finalStatus = config.enableReview ? 'pending' : 'active';
+    await ctx.database.upsert('cave', [{ id: cave.id, status: finalStatus }]);
+
+    if (finalStatus === 'pending' && reviewManager) {
+      const [finalCave] = await ctx.database.get('cave', { id: cave.id });
+      if (finalCave) reviewManager.sendForReview(finalCave);
+    }
+  } catch (fileSaveError) {
+    logger.error(`回声洞（${cave.id}）文件保存失败:`, fileSaveError);
+    await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
+    await cleanupPendingDeletions(ctx, fileManager, logger);
   }
 }
