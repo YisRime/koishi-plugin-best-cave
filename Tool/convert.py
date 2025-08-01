@@ -3,26 +3,26 @@ import datetime
 import os
 
 def convert_and_rename_files(
-    input_filename='cave.json', 
-    output_filename='cave_import.json', 
+    input_filename='cave.json',
+    output_filename='cave_import.json',
     mapping_filename='channel_mapping.json',
     resources_dir='resources'
 ):
     """
     将旧版 cave.json 转换为新版 cave_import.json 的格式，并根据规则重命名文件。
-    请放置在cave.json 同级目录下，并确保 resources 目录存在。
+    请放置在 cave.json 同级目录下，并确保 resources 目录存在。
     转换完成后，生成的文件将保存在同一目录下，但你需要把 resources 目录下的文件移动到同级目录中。
     功能:
     1. 自动加载/保存 userId 到 channelId 的映射 (`channel_mapping.json`)。
     2. 仅在遇到新的 userId 时提示输入。
-    3. 在输出的 JSON 文件中，将图片文件名更新为新格式:
+    3. 在输出的 JSON 文件中，将媒体（图片/视频）文件名更新为新格式:
        ${caveId}_${index}_${channelId}_${userId}${ext}
-    4. 在文件系统中，实际重命名 `resources` 目录下的对应图片文件。
+    4. 在文件系统中，实际重命名 `resources` 目录下的对应媒体文件。
     """
     # 确保 'resources' 目录存在
     if not os.path.exists(resources_dir):
         os.makedirs(resources_dir)
-        print(f"已创建 '{resources_dir}' 子目录。请确保所有图片文件都在此目录中。")
+        print(f"已创建 '{resources_dir}' 子目录。请确保所有媒体文件都在此目录中。")
 
     # 加载已有的 userId -> channelId 映射
     user_channel_map = {}
@@ -70,25 +70,26 @@ def convert_and_rename_files(
             except KeyboardInterrupt:
                 print("\n操作被用户中断。正在保存已输入的映射...")
                 break
-        
+
         channel_id = user_channel_map[user_id]
 
         # --- 核心逻辑：处理 elements 并重命名文件 ---
         new_elements = []
-        img_index_counter = 1 # 每个 cave_id 的图片索引从1开始
+        media_index_counter = 1 # 每个 cave_id 的媒体文件索引从1开始
         for element in item.get('elements', []):
             new_element = element.copy()
-            
-            if new_element.get('type') == 'img':
+
+            # [修改] 同时处理 image 和 video 类型
+            if new_element.get('type') in ['image', 'video']:
                 original_filename = new_element.get('file')
                 if not original_filename:
                     new_elements.append(new_element)
                     continue
 
-                # 1. 构造新文件名 (已修改顺序以匹配插件逻辑)
+                # 1. 构造新文件名
                 _, extension = os.path.splitext(original_filename)
-                new_filename = f"{cave_id}_{img_index_counter}_{channel_id}_{user_id}{extension}"
-                
+                new_filename = f"{cave_id}_{media_index_counter}_{channel_id}_{user_id}{extension}"
+
                 # 2. 定义文件的旧路径和新路径
                 old_path = os.path.join(resources_dir, os.path.basename(original_filename))
                 new_path = os.path.join(resources_dir, new_filename)
@@ -100,17 +101,17 @@ def convert_and_rename_files(
                         print(f"  成功重命名: '{os.path.basename(old_path)}' -> '{new_filename}'")
                     else:
                         print(f"  警告: 在 '{resources_dir}' 目录中未找到文件 '{os.path.basename(original_filename)}'。跳过重命名。")
-                
+
                 except Exception as e:
                     print(f"  错误: 重命名 '{os.path.basename(old_path)}' 时发生错误: {e}")
 
                 # 4. 更新 JSON 中的文件名
                 new_element['file'] = new_filename
-                img_index_counter += 1
-            
+                media_index_counter += 1
+
             new_elements.append(new_element)
 
-        # 构建输出的 JSON 对象 (已修改字段顺序以匹配插件模型)
+        # 构建输出的 JSON 对象
         new_item = {
             "elements": new_elements,
             "channelId": channel_id,
