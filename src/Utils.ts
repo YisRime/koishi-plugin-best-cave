@@ -25,9 +25,7 @@ export function storedFormatToHElements(elements: StoredElement[]): h[] {
     switch (el.type) {
       case 'text':
         return h.text(el.content);
-      case 'img':
-        // img 标签在 Koishi 中通常用 'image' 类型。
-        return h('image', { src: el.file });
+      case 'image':
       case 'video':
       case 'audio':
       case 'file':
@@ -115,10 +113,10 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
     footerFormat = formatString.substring(separatorIndex + 1);
   }
   const headerText = headerFormat.replace('{id}', cave.id.toString()).replace('{name}', cave.userName);
-  if (headerText.trim()) finalMessage.push(h('p', {}, headerText));
+  if (headerText.trim()) finalMessage.push(headerText);
   finalMessage.push(...processedElements);
   const footerText = footerFormat.replace('{id}', cave.id.toString()).replace('{name}', cave.userName);
-  if (footerText.trim()) finalMessage.push(h('p', {}, footerText));
+  if (footerText.trim()) finalMessage.push(footerText);
 
   return finalMessage;
 }
@@ -195,7 +193,7 @@ export async function getNextCaveId(ctx: Context, query: object = {}): Promise<n
  * @param fileManager - FileManager 实例。
  * @param url - 媒体资源的 URL。
  * @param originalName - 原始文件名，用于获取扩展名。
- * @param type - 媒体类型 ('img', 'video', 'audio', 'file')。
+ * @param type - 媒体类型 ('image', 'video', 'audio', 'file')。
  * @param caveId - 新建回声洞的 ID。
  * @param index - 媒体在消息中的索引。
  * @param channelId - 频道 ID。
@@ -204,7 +202,7 @@ export async function getNextCaveId(ctx: Context, query: object = {}): Promise<n
  */
 export async function downloadMedia(ctx: Context, fileManager: FileManager, url: string, originalName: string, type: string, caveId: number, index: number, channelId: string, userId: string): Promise<string> {
   // 默认扩展名映射。
-  const defaultExtMap = { 'img': '.jpg', 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
+  const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
   // 优先使用原始文件名中的扩展名，否则根据类型使用默认扩展名。
   const ext = originalName ? path.extname(originalName) : '';
   const finalExt = ext || defaultExtMap[type] || '.dat';

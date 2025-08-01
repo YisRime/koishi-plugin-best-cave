@@ -1,7 +1,7 @@
 import { Context, h, Logger } from 'koishi';
 import { CaveObject, Config } from './index';
 import { FileManager } from './FileManager';
-import { buildCaveMessage } from './Utils';
+import { buildCaveMessage, cleanupPendingDeletions } from './Utils';
 
 /**
  * 审核管理器 (ReviewManager)
@@ -113,7 +113,7 @@ export class ReviewManager {
 
     // 在内容上包裹审核提示信息。
     return [
-      h('p', `以下内容待审核：`),
+      `以下内容待审核：`,
       ...caveContent,
     ];
   }
@@ -131,7 +131,7 @@ export class ReviewManager {
     if (!cave) return `回声洞（${caveId}）不存在`;
     if (cave.status !== 'pending') return `回声洞（${caveId}）无需审核`;
 
-    let resultMessage: string;
+    let resultMessage: string | (string | h)[];
     let broadcastMessage: string | (string | h)[]; // 发送给其他管理员的通知消息。
 
     if (action === 'approve') {
@@ -140,16 +140,24 @@ export class ReviewManager {
       resultMessage = `回声洞（${caveId}）已通过`;
       broadcastMessage = `回声洞（${caveId}）已由管理员 "${adminUserName}" 通过`;
     } else { // 'reject'
-      // 拒绝审核：将状态更新为 'delete'，后续由清理任务处理。
+      // 拒绝审核：将状态标记为 'delete'。
       await this.ctx.database.upsert('cave', [{ id: caveId, status: 'delete' }]);
-      resultMessage = `回声洞（${caveId}）已拒绝`;
 
-      // 拒绝时，最好将内容也广播给其他管理员，让他们知晓被拒绝的内容是什么。
+      // 在触发后台清理前，先构建好包含内容的消息，以防文件被提前删除。
       const caveContent = await buildCaveMessage(cave, this.config, this.fileManager, this.logger);
+
+      // 准备要返回给操作者和广播给其他管理员的消息。
+      resultMessage = [
+        `回声洞（${caveId}）已拒绝`,
+        ...caveContent,
+      ];
       broadcastMessage = [
-        h('p', `回声洞（${caveId}）已由管理员 "${adminUserName}" 拒绝`),
+        `回声洞（${caveId}）已由管理员 "${adminUserName}" 拒绝`,
         ...caveContent
       ];
+
+      // 异步触发一次清理，此操作不会阻塞后续代码。
+      cleanupPendingDeletions(this.ctx, this.fileManager, this.logger);
     }
 
     // 向其他管理员广播审核结果。

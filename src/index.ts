@@ -33,7 +33,7 @@ const logger = new Logger('best-cave');
  * @property file - 文件标识符（本地文件名或 S3 Key），用于媒体类型。
  */
 export interface StoredElement {
-  type: 'text' | 'img' | 'video' | 'audio' | 'file';
+  type: 'text' | 'image' | 'video' | 'audio' | 'file';
   content?: string;
   file?: string;
 }
@@ -193,9 +193,6 @@ export function apply(ctx: Context, config: Config) {
   cave.subcommand('.add [content:text]', '添加回声洞')
     .usage('添加一条回声洞。可以直接发送内容，也可以回复或引用一条消息。')
     .action(async ({ session }, content) => {
-      // 在添加新洞前，执行一次清理，移除被标记为删除的旧洞。
-      utils.cleanupPendingDeletions(ctx, fileManager, logger);
-
       const savedFileIdentifiers: string[] = []; // 存储本次操作中保存的文件名，用于失败时回滚。
       try {
         let sourceElements: h[]; // 用来存储源消息的 h() 元素数组。
@@ -222,11 +219,10 @@ export function apply(ctx: Context, config: Config) {
         // 递归函数，用于遍历处理消息中的所有 h() 元素。
         async function traverseAndProcess(elements: h[]) {
           for (const el of elements) {
-            // 将 'image' 类型统一为 'img' 以匹配 StoredElement 类型。
-            const elementType = (el.type === 'image' ? 'img' : el.type) as StoredElement['type'];
+            const elementType = el.type as StoredElement['type'];
 
             // 处理媒体元素
-            if (['img', 'video', 'audio', 'file'].includes(elementType) && el.attrs.src) {
+            if (['image', 'video', 'audio', 'file'].includes(elementType) && el.attrs.src) {
               let fileIdentifier = el.attrs.src as string;
               // 如果 src 是网络链接，则下载。
               if (fileIdentifier.startsWith('http')) {
@@ -328,16 +324,18 @@ export function apply(ctx: Context, config: Config) {
           return '抱歉，你没有权限删除这条回声洞';
         }
 
-        // 先将状态标记为 'delete'，然后由清理任务来异步删除文件和记录。
-        // 这样做可以避免在删除文件时阻塞当前命令的响应。
+        // 先将状态标记为 'delete'。
         await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
 
-        // 立即触发一次清理，以便用户能尽快看到结果。
+        // 在触发后台清理前，先构建好消息，避免竞争删除文件导致消息内容不完整。
+        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
+
+        // 立即触发一次清理，让它在后台运行，不会阻塞当前响应。
         utils.cleanupPendingDeletions(ctx, fileManager, logger);
 
-        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
+        // 立刻向用户返回已删除的消息。
         return [
-          h('p', {}, `以下内容已删除`),
+          `以下内容已删除`,
           ...caveMessage,
         ];
       } catch (error) {
