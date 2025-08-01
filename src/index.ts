@@ -8,6 +8,7 @@ import * as utils from './Utils'
 export const name = 'best-cave'
 export const inject = ['database']
 
+// 插件使用说明
 export const usage = `
 <div style="border-radius: 10px; border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
   <h2 style="margin-top: 0; color: #4a6ee0;">📌 插件说明</h2>
@@ -23,68 +24,73 @@ export const usage = `
 `
 const logger = new Logger('best-cave');
 
-// --- 数据类型定义 ---
+// --- 数据类型定义 (Data Type Definitions) ---
 
 /**
- * @interface StoredElement
- * @description 单个消息元素的数据库存储格式。
- * @property type - 元素类型: 'text', 'image', 'video', 'audio', 'file'。
+ * 存储在数据库中的单个消息元素。
+ * @property type - 元素类型。
  * @property content - 文本内容，仅用于 'text' 类型。
- * @property file - 文件标识符 (本地文件名或 S3 Key)，用于媒体类型。
+ * @property file - 文件标识符（本地文件名或 S3 Key），用于媒体类型。
  */
 export interface StoredElement {
-  type: 'text' | 'image' | 'video' | 'audio' | 'file';
+  type: 'text' | 'img' | 'video' | 'audio' | 'file';
   content?: string;
   file?: string;
 }
 
 /**
- * @interface CaveObject
- * @description `cave` 数据表的完整对象模型。
- * @property id - 回声洞的唯一数字 ID (主键)。
- * @property elements - 构成回声洞内容的 StoredElement 数组。
+ * 数据库中 `cave` 表的完整对象模型。
+ * @property id - 回声洞的唯一数字 ID。
+ * @property elements - 构成回声洞内容的元素数组。
  * @property channelId - 提交回声洞的频道 ID，若为私聊则为 null。
  * @property userId - 提交用户的 ID。
  * @property userName - 提交用户的昵称。
  * @property status - 回声洞状态: 'active' (活跃), 'delete' (待删除), 'pending' (待审核)。
- * @property time - 提交的时间戳。
+ * @property time - 提交时间。
  */
 export interface CaveObject {
-  id: number;
-  elements: StoredElement[];
-  channelId: string;
-  userId: string;
-  userName: string;
-  status: 'active' | 'delete' | 'pending';
-  time: Date;
+  id: number
+  elements: StoredElement[]
+  channelId: string
+  userId: string
+  userName: string
+  status: 'active' | 'delete' | 'pending'
+  time: Date
 }
 
+// 扩展 Koishi 的数据库表接口，以获得 'cave' 表的类型提示。
 declare module 'koishi' {
   interface Tables {
-    cave: CaveObject;
+    cave: CaveObject
   }
 }
 
-// --- 插件配置 ---
+// --- 插件配置 (Plugin Configuration) ---
 
+/**
+ * 插件的配置接口。
+ */
 export interface Config {
-  coolDown: number;
-  perChannel: boolean;
-  adminUsers: string[];
-  enableProfile: boolean;
-  enableIO: boolean;
-  enableReview: boolean;
-  caveFormat: string;
-  localPath?: string;
-  enableS3: boolean;
-  publicUrl?: string;
-  endpoint?: string;
-  bucket?: string;
-  region?: string;
-  accessKeyId?: string;
-  secretAccessKey?: string;
+  coolDown: number
+  perChannel: boolean
+  adminUsers: string[]
+  enableProfile: boolean
+  enableIO: boolean
+  enableReview: boolean
+  caveFormat: string
+  localPath?: string
+  enableS3: boolean
+  endpoint?: string
+  region?: string
+  accessKeyId?: string
+  secretAccessKey?: string
+  bucket?: string
+  publicUrl?: string
 }
 
+/**
+ * 使用 Koishi Schema 定义插件的配置项，用于生成配置界面。
+ */
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     coolDown: Schema.number().default(10).description("冷却时间（秒）"),
@@ -109,35 +115,39 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("存储配置"),
 ]);
 
-// --- 插件主逻辑 ---
+// --- 插件主逻辑 (Plugin Main Logic) ---
 
 /**
- * 插件主逻辑入口。
+ * 插件的入口函数。
  * @param ctx - Koishi 上下文。
  * @param config - 用户提供的插件配置。
  */
 export function apply(ctx: Context, config: Config) {
+
+  // 扩展 'cave' 数据表模型。
   ctx.model.extend('cave', {
-    id: 'unsigned',
-    elements: 'json',
-    channelId: 'string',
-    userId: 'string',
-    userName: 'string',
-    status: 'string',
-    time: 'timestamp',
+    id: 'unsigned',       // 无符号整数，作为主键。
+    elements: 'json',     // 存储为 JSON 字符串的元素数组。
+    channelId: 'string',  // 频道 ID。
+    userId: 'string',     // 用户 ID。
+    userName: 'string',   // 用户昵称。
+    status: 'string',     // 回声洞状态。
+    time: 'timestamp',    // 提交时间。
   }, {
-    primary: 'id',
+    primary: 'id', // 将 'id' 字段设置为主键。
   });
 
-  // --- 初始化管理器 ---
+  // --- 初始化管理器 (Initialize Managers) ---
+
   const fileManager = new FileManager(ctx.baseDir, config, logger);
-  const lastUsed = new Map<string, number>();
+  const lastUsed = new Map<string, number>(); // 存储指令冷却时间戳，键为 channelId。
 
   let profileManager: ProfileManager;
   let dataManager: DataManager;
   let reviewManager: ReviewManager;
 
-  // --- 主命令定义 ---
+  // --- 指令定义 (Command Definitions) ---
+
   const cave = ctx.command('cave', '回声洞')
     .option('add', '-a <content:text> 添加回声洞')
     .option('view', '-g <id:posint> 查看指定回声洞')
@@ -154,97 +164,129 @@ export function apply(ctx: Context, config: Config) {
       if (cdMessage) return cdMessage;
 
       try {
+        // 获取当前作用域的查询条件（全局或本群）。
         const query = utils.getScopeQuery(session, config);
+        // 只获取 ID 列表以提高性能。
         const candidates = await ctx.database.get('cave', query, { fields: ['id'] });
+
         if (candidates.length === 0) {
           return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
         }
 
+        // 从候选列表中随机抽取一个 ID。
         const randomId = candidates[Math.floor(Math.random() * candidates.length)].id;
+        // 获取该 ID 对应的完整回声洞数据。
         const [randomCave] = await ctx.database.get('cave', { ...query, id: randomId });
 
-        if (randomCave) {
-            utils.updateCooldownTimestamp(session, config, lastUsed);
-            return utils.buildCaveMessage(randomCave, config, fileManager, logger);
-        }
-        return '未能获取到回声洞';
+        // 更新冷却时间戳。
+        utils.updateCooldownTimestamp(session, config, lastUsed);
+        // 构建并返回消息。
+        return utils.buildCaveMessage(randomCave, config, fileManager, logger);
       } catch (error) {
         logger.error('随机获取回声洞失败:', error);
+        return '随机获取回声洞失败';
       }
     });
 
-  // --- 子命令注册 ---
+  // --- 注册子命令 (Register Subcommands) ---
 
   cave.subcommand('.add [content:text]', '添加回声洞')
     .usage('添加一条回声洞。可以直接发送内容，也可以回复或引用一条消息。')
     .action(async ({ session }, content) => {
+      // 在添加新洞前，执行一次清理，移除被标记为删除的旧洞。
+      utils.cleanupPendingDeletions(ctx, fileManager, logger);
+
+      const savedFileIdentifiers: string[] = []; // 存储本次操作中保存的文件名，用于失败时回滚。
       try {
-        let sourceElements: h[] = session.quote?.elements;
-        if (!sourceElements) {
-            const sourceText = content?.trim();
-            if(sourceText) {
-                sourceElements = h.parse(sourceText);
-            } else {
-                await session.send("请在一分钟内发送你要添加的内容");
-                const reply = await session.prompt(60000);
-                if (!reply) return "操作超时，已取消添加";
-                sourceElements = h.parse(reply);
-            }
+        let sourceElements: h[]; // 用来存储源消息的 h() 元素数组。
+
+        if (session.quote?.elements) {
+          // 优先使用引用的消息内容。
+          sourceElements = session.quote.elements;
+        } else if (content?.trim()) {
+          // 其次使用指令后的文本内容。
+          sourceElements = h.parse(content);
+        } else {
+          // 如果都没有，则提示用户输入。
+          await session.send("请在一分钟内发送你要添加的内容");
+          const reply = await session.prompt(60000); // 等待 60 秒。
+          if (!reply) return "操作超时，已取消添加";
+          sourceElements = h.parse(reply);
         }
 
         const scopeQuery = utils.getScopeQuery(session, config);
+        const newId = await utils.getNextCaveId(ctx, scopeQuery);
+        const finalElementsForDb: StoredElement[] = []; // 存储处理后待存入数据库的元素。
+        let mediaIndex = 0; // 媒体文件计数器，用于生成唯一文件名。
 
-        // Inlined getNextCaveId
-        const allCaves = await ctx.database.get('cave', scopeQuery, { fields: ['id'] });
-        const existingIds = new Set(allCaves.map(c => c.id));
-        let newId = 1;
-        while (existingIds.has(newId)) {
-          newId++;
+        // 递归函数，用于遍历处理消息中的所有 h() 元素。
+        async function traverseAndProcess(elements: h[]) {
+          for (const el of elements) {
+            // 将 'image' 类型统一为 'img' 以匹配 StoredElement 类型。
+            const elementType = (el.type === 'image' ? 'img' : el.type) as StoredElement['type'];
+
+            // 处理媒体元素
+            if (['img', 'video', 'audio', 'file'].includes(elementType) && el.attrs.src) {
+              let fileIdentifier = el.attrs.src as string;
+              // 如果 src 是网络链接，则下载。
+              if (fileIdentifier.startsWith('http')) {
+                mediaIndex++;
+                const originalName = el.attrs.file as string;
+                const savedId = await utils.downloadMedia(ctx, fileManager, fileIdentifier, originalName, elementType, newId, mediaIndex, session.channelId, session.userId);
+                savedFileIdentifiers.push(savedId);
+                fileIdentifier = savedId; // 更新文件标识符为保存后的名称。
+              }
+              finalElementsForDb.push({ type: elementType, file: fileIdentifier });
+            } else if (elementType === 'text' && el.attrs.content?.trim()) {
+              // 处理文本元素，忽略纯空白内容。
+              finalElementsForDb.push({ type: 'text', content: el.attrs.content.trim() });
+            }
+            // 递归处理子元素。
+            if (el.children) await traverseAndProcess(el.children);
+          }
         }
 
-        const { finalElementsForDb, mediaToDownload } = utils.prepareElementsForStorage(sourceElements, newId, session.channelId, session.userId);
+        await traverseAndProcess(sourceElements);
+
         if (finalElementsForDb.length === 0) return "内容为空，已取消添加";
 
         let userName = session.username;
-        if (config.enableProfile && profileManager) {
+        // 如果启用了昵称功能，获取并使用自定义昵称。
+        if (config.enableProfile) {
           userName = (await profileManager.getNickname(session.userId)) || userName;
         }
 
+        // 构建新的回声洞对象。
         const newCave: CaveObject = {
           id: newId,
           elements: finalElementsForDb,
           channelId: session.channelId,
           userId: session.userId,
-          userName,
+          userName: userName,
           status: config.enableReview ? 'pending' : 'active',
           time: new Date(),
         };
-
         await ctx.database.create('cave', newCave);
 
-        try {
-          const downloadPromises = mediaToDownload.map(async (media) => {
-            const response = await ctx.http.get(media.url, { responseType: 'arraybuffer', timeout: 30000 });
-            await fileManager.saveFile(media.fileName, Buffer.from(response));
-          });
-          await Promise.all(downloadPromises);
-        } catch (fileError) {
-          await ctx.database.remove('cave', { id: newId });
-          logger.error('媒体文件存储失败:', fileError);
-          return '添加失败：媒体文件存储失败';
-        }
-
-        if (newCave.status === 'pending' && reviewManager) {
+        // 如果需要审核，则发送通知给管理员。
+        if (newCave.status === 'pending') {
           reviewManager.sendForReview(newCave);
           return `提交成功，序号为（${newCave.id}）`;
         }
+
         return `添加成功，序号为（${newId}）`;
       } catch (error) {
         logger.error('添加回声洞失败:', error);
+        // 如果在处理过程中已经保存了文件，但最终失败了，则删除这些“孤儿”文件。
+        if (savedFileIdentifiers.length > 0) {
+          logger.info(`添加失败，回滚并删除 ${savedFileIdentifiers.length} 个文件...`);
+          await Promise.all(savedFileIdentifiers.map(fileId => fileManager.deleteFile(fileId)));
+        }
         return '添加失败，请稍后再试';
       }
     });
 
+  // 子命令: cave.review
   cave.subcommand('.view <id:posint>', '查看指定回声洞')
     .usage('通过序号查看对应的回声洞。')
     .action(async ({ session }, id) => {
@@ -257,7 +299,9 @@ export function apply(ctx: Context, config: Config) {
         const query = { ...utils.getScopeQuery(session, config), id };
         const [targetCave] = await ctx.database.get('cave', query);
 
-        if (!targetCave) return `回声洞（${id}）不存在`;
+        if (!targetCave) {
+          return `回声洞（${id}）不存在`;
+        }
 
         utils.updateCooldownTimestamp(session, config, lastUsed);
         return utils.buildCaveMessage(targetCave, config, fileManager, logger);
@@ -267,12 +311,14 @@ export function apply(ctx: Context, config: Config) {
       }
     });
 
+  // 子命令: cave.del
   cave.subcommand('.del <id:posint>', '删除指定回声洞')
     .usage('通过序号删除对应的回声洞。')
     .action(async ({ session }, id) => {
       if (!id) return '请输入要删除的回声洞序号';
 
       try {
+        // 只能删除 active 状态的洞。
         const [targetCave] = await ctx.database.get('cave', { id, status: 'active' });
         if (!targetCave) return `回声洞（${id}）不存在`;
 
@@ -282,30 +328,35 @@ export function apply(ctx: Context, config: Config) {
           return '抱歉，你没有权限删除这条回声洞';
         }
 
-        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
-
+        // 先将状态标记为 'delete'，然后由清理任务来异步删除文件和记录。
+        // 这样做可以避免在删除文件时阻塞当前命令的响应。
         await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
 
-        session.send([`已删除`, ...caveMessage]);
+        // 立即触发一次清理，以便用户能尽快看到结果。
+        utils.cleanupPendingDeletions(ctx, fileManager, logger);
 
-        utils.cleanupPendingDeletions(ctx, fileManager, logger).catch(err => {
-            logger.error(`删除回声洞（${id}）失败:`, err);
-        });
-
+        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
+        return [
+          h('p', {}, `以下内容已删除`),
+          ...caveMessage,
+        ];
       } catch (error) {
-        logger.error(`标记删除回声洞（${id}）失败:`, error);
+        logger.error(`标记回声洞（${id}）失败:`, error);
         return '删除失败，请稍后再试';
       }
     });
 
+  // 子命令: cave.list
   cave.subcommand('.list', '查询我的投稿')
     .usage('查询并列出你所有投稿的回声洞序号。')
     .action(async ({ session }) => {
       try {
+        // 查询条件：当前作用域、当前用户、活动状态。
         const query = { ...utils.getScopeQuery(session, config), userId: session.userId };
         const userCaves = await ctx.database.get('cave', query);
         if (userCaves.length === 0) return '你还没有投稿过回声洞';
 
+        // 格式化输出 ID 列表。
         const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join(', ');
         return `你已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;
       } catch (error) {
@@ -314,7 +365,7 @@ export function apply(ctx: Context, config: Config) {
       }
     });
 
-  // --- 条件化注册子模块 ---
+  // --- 条件化注册子模块 (Conditionally Register Sub-modules) ---
 
   if (config.enableProfile) {
     profileManager = new ProfileManager(ctx);
