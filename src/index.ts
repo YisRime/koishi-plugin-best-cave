@@ -1,5 +1,4 @@
 import { Context, Schema, Logger, h } from 'koishi'
-import * as path from 'path'
 import { FileManager } from './FileManager'
 import { ProfileManager } from './ProfileManager'
 import { DataManager } from './DataManager'
@@ -114,17 +113,17 @@ export function apply(ctx: Context, config: Config) {
 
   // --- 初始化管理器 ---
   const fileManager = new FileManager(ctx.baseDir, config, logger);
-  const lastUsed = new Map<string, number>(); // 指令冷却时间戳存储
-  let profileManager: ProfileManager;
-  let dataManager: DataManager;
-  let reviewManager: ReviewManager;
+  const lastUsed = new Map<string, number>();
+  const profileManager = config.enableProfile ? new ProfileManager(ctx) : null;
+  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger) : null;
+  const reviewManager = config.enableReview ? new ReviewManager(ctx, config, fileManager, logger) : null;
 
   // --- 指令定义 ---
   const cave = ctx.command('cave', '回声洞')
-    .option('add', '-a <content:text> 添加回声洞')
-    .option('view', '-g <id:posint> 查看指定回声洞')
-    .option('delete', '-r <id:posint> 删除指定回声洞')
-    .option('list', '-l 查询投稿统计')
+    .option('add', '-a <content:text>')
+    .option('view', '-g <id:posint>')
+    .option('delete', '-r <id:posint>')
+    .option('list', '-l')
     .usage('随机抽取一条已添加的回声洞。')
     .action(async ({ session, options }) => {
       // 选项快捷方式
@@ -139,7 +138,7 @@ export function apply(ctx: Context, config: Config) {
       try {
         const query = utils.getScopeQuery(session, config);
         const candidates = await ctx.database.get('cave', query, { fields: ['id'] });
-        if (candidates.length === 0) {
+        if (!candidates.length) {
           return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
         }
 
@@ -160,70 +159,52 @@ export function apply(ctx: Context, config: Config) {
     .usage('添加一条回声洞。可以直接发送内容，也可以回复或引用一条消息。')
     .action(async ({ session }, content) => {
       try {
-        let sourceElements: h[];
-        if (session.quote?.elements) {
-          sourceElements = session.quote.elements;
-        } else if (content?.trim()) {
-          sourceElements = h.parse(content);
-        } else {
-          await session.send("请在一分钟内发送你要添加的内容");
-          const reply = await session.prompt(60000);
-          if (!reply) return "操作超时，已取消添加";
-          sourceElements = h.parse(reply);
+        let sourceElements = session.quote?.elements;
+        if (!sourceElements && content?.trim()) {
+            sourceElements = h.parse(content);
+        }
+        if (!sourceElements) {
+            await session.send("请在一分钟内发送你要添加的内容");
+            const reply = await session.prompt(60000);
+            if (!reply) return "操作超时，已取消添加";
+            sourceElements = h.parse(reply);
         }
 
-        const idScopeQuery = {};
-        if (config.perChannel && session.channelId) {
-          idScopeQuery['channelId'] = session.channelId;
-        }
+        const idScopeQuery = config.perChannel && session.channelId ? { channelId: session.channelId } : {};
         const newId = await utils.getNextCaveId(ctx, idScopeQuery);
 
-        // 使用工具函数处理消息元素
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(
           sourceElements, newId, session.channelId, session.userId
         );
 
         if (finalElementsForDb.length === 0) return "内容为空，已取消添加";
 
-        const customNickname = config.enableProfile ? await profileManager.getNickname(session.userId) : null;
-        const userName = customNickname || session.username;
+        const userName = (config.enableProfile ? await profileManager.getNickname(session.userId) : null) || session.username;
+        const hasMedia = mediaToSave.length > 0;
+        const initialStatus = hasMedia ? 'preload' : (config.enableReview ? 'pending' : 'active');
 
-        // 根据是否有媒体文件来决定处理流程
-        if (mediaToSave.length > 0) {
-          const newCave: CaveObject = {
-            id: newId,
-            elements: finalElementsForDb,
-            channelId: session.channelId,
-            userId: session.userId,
-            userName,
-            status: 'preload',
-            time: new Date(),
-          };
-          await ctx.database.create('cave', newCave);
+        const newCave: CaveObject = {
+          id: newId,
+          elements: finalElementsForDb,
+          channelId: session.channelId,
+          userId: session.userId,
+          userName,
+          status: initialStatus,
+          time: new Date(),
+        };
 
-          // 异步处理文件上传和状态更新
+        await ctx.database.create('cave', newCave);
+
+        if (hasMedia) {
+          // 异步处理文件上传
           utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave);
-
-          return config.enableReview ? `提交成功，序号为（${newId}）` : `添加成功，序号为（${newId}）`;
-        } else {
-          const finalStatus = config.enableReview ? 'pending' : 'active';
-          const newCave: CaveObject = {
-            id: newId,
-            elements: finalElementsForDb,
-            channelId: session.channelId,
-            userId: session.userId,
-            userName,
-            status: finalStatus,
-            time: new Date(),
-          };
-          await ctx.database.create('cave', newCave);
-
-          if (finalStatus === 'pending') {
-            reviewManager.sendForReview(newCave);
-            return `提交成功，序号为（${newId}）`;
-          }
-          return `添加成功，序号为（${newId}）`;
+        } else if (initialStatus === 'pending') {
+          reviewManager.sendForReview(newCave);
         }
+
+        return (initialStatus === 'pending' || initialStatus === 'preload' && config.enableReview)
+          ? `提交成功，序号为（${newId}）`
+          : `添加成功，序号为（${newId}）`;
       } catch (error) {
         logger.error('添加回声洞失败:', error);
         return '添加失败，请稍后再试';
@@ -255,13 +236,18 @@ export function apply(ctx: Context, config: Config) {
       try {
         const [targetCave] = await ctx.database.get('cave', { id, status: 'active' });
         if (!targetCave) return `回声洞（${id}）不存在`;
-        const adminChannelId = config.adminChannel ? config.adminChannel.split(':')[1] : null;
-        if (targetCave.userId !== session.userId && session.channelId !== adminChannelId) {
+
+        const adminChannelId = config.adminChannel?.split(':')[1];
+        const isAuthor = targetCave.userId === session.userId;
+        const isAdmin = session.channelId === adminChannelId;
+
+        if (!isAuthor && !isAdmin) {
           return '你没有权限删除这条回声洞';
         }
+
         await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
         const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
-        utils.cleanupPendingDeletions(ctx, fileManager, logger);
+        utils.cleanupPendingDeletions(ctx, fileManager, logger); // 异步清理
         return [`已删除`, ...caveMessage];
       } catch (error) {
         logger.error(`标记回声洞（${id}）失败:`, error);
@@ -274,8 +260,8 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session }) => {
       try {
         const query = { ...utils.getScopeQuery(session, config), userId: session.userId };
-        const userCaves = await ctx.database.get('cave', query);
-        if (userCaves.length === 0) return '你还没有投稿过回声洞';
+        const userCaves = await ctx.database.get('cave', query, { fields: ['id'] });
+        if (!userCaves.length) return '你还没有投稿过回声洞';
         const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join(', ');
         return `你已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;
       } catch (error) {
@@ -285,16 +271,7 @@ export function apply(ctx: Context, config: Config) {
     });
 
   // --- 条件化注册子模块 ---
-  if (config.enableProfile) {
-    profileManager = new ProfileManager(ctx);
-    profileManager.registerCommands(cave);
-  }
-  if (config.enableIO) {
-    dataManager = new DataManager(ctx, config, fileManager, logger);
-    dataManager.registerCommands(cave);
-  }
-  if (config.enableReview) {
-    reviewManager = new ReviewManager(ctx, config, fileManager, logger);
-    reviewManager.registerCommands(cave);
-  }
+  if (profileManager) profileManager.registerCommands(cave);
+  if (dataManager) dataManager.registerCommands(cave);
+  if (reviewManager) reviewManager.registerCommands(cave);
 }

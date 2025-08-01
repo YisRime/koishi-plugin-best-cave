@@ -23,10 +23,8 @@ export class FileManager {
    * @param logger 日志记录器实例。
    */
   constructor(baseDir: string, config: Config, private logger: Logger) {
-    // 统一将资源文件存储在 Koishi data 目录的 'cave' 子目录中。
     this.resourceDir = path.join(baseDir, 'data', 'cave');
 
-    // 若启用 S3 且关键信息完整，则初始化 S3 客户端。
     if (config.enableS3 && config.endpoint && config.bucket && config.accessKeyId && config.secretAccessKey) {
       this.s3Client = new S3Client({
         endpoint: config.endpoint,
@@ -48,11 +46,9 @@ export class FileManager {
    * @returns 返回异步操作的结果。
    */
   private async withLock<T>(fullPath: string, operation: () => Promise<T>): Promise<T> {
-    // 等待已有的锁完成。
     while (this.locks.has(fullPath)) {
       await this.locks.get(fullPath);
     }
-    // 创建新锁并立即执行操作，确保操作完成后释放锁。
     const promise = operation().finally(() => {
       this.locks.delete(fullPath);
     });
@@ -68,19 +64,17 @@ export class FileManager {
    */
   public async saveFile(fileName: string, data: Buffer): Promise<string> {
     if (this.s3Client) {
-      // S3 存储
       const command = new PutObjectCommand({
         Bucket: this.s3Bucket,
         Key: fileName,
         Body: data,
-        ACL: 'public-read', // 默认为公开可读
+        ACL: 'public-read',
       });
       await this.s3Client.send(command);
     } else {
-      // 本地存储
       await fs.mkdir(this.resourceDir, { recursive: true }).catch(error => {
-          this.logger.error(`创建资源目录失败 ${this.resourceDir}:`, error);
-          throw error;
+        this.logger.error(`创建资源目录失败 ${this.resourceDir}:`, error);
+        throw error;
       });
       const filePath = path.join(this.resourceDir, fileName);
       await this.withLock(filePath, () => fs.writeFile(filePath, data));
@@ -95,13 +89,10 @@ export class FileManager {
    */
   public async readFile(fileName: string): Promise<Buffer> {
     if (this.s3Client) {
-      // S3 读取
       const command = new GetObjectCommand({ Bucket: this.s3Bucket, Key: fileName });
       const response = await this.s3Client.send(command);
-      // S3 Body 是一个 ReadableStream，需转换为 Buffer。
       return Buffer.from(await response.Body.transformToByteArray());
     } else {
-      // 本地读取
       const filePath = path.join(this.resourceDir, fileName);
       return this.withLock(filePath, () => fs.readFile(filePath));
     }
@@ -112,25 +103,19 @@ export class FileManager {
    * @param fileIdentifier 要删除的文件名/标识符。
    */
   public async deleteFile(fileIdentifier: string): Promise<void> {
-    if (this.s3Client) {
-      // S3 删除
-      const command = new DeleteObjectCommand({ Bucket: this.s3Bucket, Key: fileIdentifier });
-      await this.s3Client.send(command).catch(err => {
-        this.logger.warn(`删除 S3 文件 ${fileIdentifier} 失败:`, err);
-      });
-    } else {
-      // 本地删除
-      const filePath = path.join(this.resourceDir, fileIdentifier);
-      await this.withLock(filePath, async () => {
-        try {
-          await fs.unlink(filePath);
-        } catch (error) {
-          // 如果文件已不存在(ENOENT)，则忽略错误，保证操作幂等性。
-          if (error.code !== 'ENOENT') {
-            this.logger.warn(`删除本地文件 ${filePath} 失败:`, error);
-          }
-        }
-      });
+    try {
+      if (this.s3Client) {
+        const command = new DeleteObjectCommand({ Bucket: this.s3Bucket, Key: fileIdentifier });
+        await this.s3Client.send(command);
+      } else {
+        const filePath = path.join(this.resourceDir, fileIdentifier);
+        await this.withLock(filePath, () => fs.unlink(filePath));
+      }
+    } catch (error) {
+      // 忽略文件不存在的错误，保证操作幂等性。
+      if (error.code !== 'ENOENT' && error.name !== 'NoSuchKey') {
+        this.logger.warn(`删除文件 ${fileIdentifier} 失败:`, error);
+      }
     }
   }
 }

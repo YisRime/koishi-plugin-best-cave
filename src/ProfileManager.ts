@@ -47,14 +47,12 @@ export class ProfileManager {
       .usage('设置你在回声洞中显示的昵称。若不提供昵称，则清除现有昵称。')
       .action(async ({ session }, nickname) => {
         const trimmedNickname = nickname?.trim();
-
         if (trimmedNickname) {
           await this.setNickname(session.userId, trimmedNickname);
           return `昵称已更新为：${trimmedNickname}`;
-        } else {
-          await this.clearNickname(session.userId);
-          return '昵称已清除';
         }
+        await this.clearNickname(session.userId);
+        return '昵称已清除';
       });
   }
 
@@ -64,7 +62,6 @@ export class ProfileManager {
    * @param nickname - 要设置的新昵称。
    */
   public async setNickname(userId: string, nickname: string): Promise<void> {
-    // 使用 `upsert` 方法，如果记录已存在则更新，不存在则插入。
     await this.ctx.database.upsert('cave_user', [{ userId, nickname }]);
   }
 
@@ -74,9 +71,8 @@ export class ProfileManager {
    * @returns 返回用户的昵称字符串，如果未设置则返回 null。
    */
   public async getNickname(userId: string): Promise<string | null> {
-    // 直接查询并返回结果，代码更简洁。
-    const profile = await this.ctx.database.get('cave_user', { userId });
-    return profile[0]?.nickname ?? null;
+    const [profile] = await this.ctx.database.get('cave_user', { userId }, { fields: ['nickname'] });
+    return profile?.nickname ?? null;
   }
 
   /**
@@ -84,7 +80,6 @@ export class ProfileManager {
    * @param userId - 目标用户的 ID。
    */
   public async clearNickname(userId: string): Promise<void> {
-    // 从数据库中删除指定用户的记录。
     await this.ctx.database.remove('cave_user', { userId });
   }
 }

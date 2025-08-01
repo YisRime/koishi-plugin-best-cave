@@ -30,12 +30,12 @@ export class ReviewManager {
     cave.subcommand('.review [id:posint] [action:string]', '审核回声洞')
       .usage('查看或审核回声洞，使用 <Y/N> 进行审核。')
       .action(async ({ session }, id, action) => {
-        const adminChannelId = this.config.adminChannel ? this.config.adminChannel.split(':')[1] : null;
+        const adminChannelId = this.config.adminChannel?.split(':')[1];
         if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
 
         if (!id) {
-          const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' });
-          if (pendingCaves.length === 0) return '当前没有需要审核的回声洞';
+          const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' }, { fields: ['id'] });
+          if (!pendingCaves.length) return '当前没有需要审核的回声洞';
           return `当前共有 ${pendingCaves.length} 条待审核回声洞，序号为：\n${pendingCaves.map(c => c.id).join(', ')}`;
         }
 
@@ -43,17 +43,19 @@ export class ReviewManager {
         if (!targetCave) return `回声洞（${id}）不存在`;
         if (targetCave.status !== 'pending') return `回声洞（${id}）无需审核`;
 
-        if (id && !action) {
+        if (!action) {
           return [`待审核：`, ...await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger)];
         }
 
         const normalizedAction = action.toLowerCase();
-        let reviewAction: 'approve' | 'reject';
-        if (['y', 'yes', 'ok', 'pass', 'approve'].includes(normalizedAction)) reviewAction = 'approve';
-        else if (['n', 'no', 'deny', 'reject'].includes(normalizedAction)) reviewAction = 'reject';
-        else return `无效操作: "${action}"\n请使用 "Y" (通过) 或 "N" (拒绝)`;
+        if (['y', 'yes', 'pass', 'approve'].includes(normalizedAction)) {
+          return this.processReview('approve', id);
+        }
+        if (['n', 'no', 'deny', 'reject'].includes(normalizedAction)) {
+          return this.processReview('reject', id);
+        }
 
-        return this.processReview(reviewAction, id);
+        return `无效操作: "${action}"\n请使用 "Y" (通过) 或 "N" (拒绝)`;
       });
   }
 
@@ -62,18 +64,14 @@ export class ReviewManager {
    * @param cave 新创建的、状态为 'pending' 的回声洞对象。
    */
   public async sendForReview(cave: CaveObject): Promise<void> {
-    const channelParts = this.config.adminChannel?.split(':');
-
-    if (!channelParts || channelParts.length < 2 || !channelParts[1]) {
+    if (!this.config.adminChannel?.includes(':')) {
       this.logger.warn(`管理群组配置无效，已自动通过回声洞（${cave.id}）`);
       await this.ctx.database.upsert('cave', [{ id: cave.id, status: 'active' }]);
       return;
     }
 
-    // 构建审核消息
-    const reviewMessage = [`待审核：`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
-
     try {
+      const reviewMessage = [`待审核：`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
       await this.ctx.broadcast([this.config.adminChannel], h.normalize(reviewMessage));
     } catch (error) {
       this.logger.error(`发送回声洞（${cave.id}）审核消息失败:`, error);
@@ -90,20 +88,14 @@ export class ReviewManager {
     const [cave] = await this.ctx.database.get('cave', { id: caveId, status: 'pending' });
     if (!cave) return `回声洞（${caveId}）无需审核`;
 
-    let resultMessage: string;
-
     if (action === 'approve') {
-      // 通过审核：更新状态为 'active'
       await this.ctx.database.upsert('cave', [{ id: caveId, status: 'active' }]);
-      resultMessage = `回声洞（${caveId}）已通过`;
+      return `回声洞（${caveId}）已通过`;
     } else {
-      // 拒绝审核：标记为 'delete'
       await this.ctx.database.upsert('cave', [{ id: caveId, status: 'delete' }]);
-      resultMessage = `回声洞（${caveId}）已拒绝`;
       // 异步触发清理，不阻塞当前响应
       cleanupPendingDeletions(this.ctx, this.fileManager, this.logger);
+      return `回声洞（${caveId}）已拒绝`;
     }
-
-    return resultMessage;
   }
 }
