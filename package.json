@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-best-cave",
   "description": "最强大的回声洞现已重构完成啦！注意数据格式需要使用脚本转换哦~",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],
