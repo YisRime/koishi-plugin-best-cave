@@ -37,28 +37,49 @@ export class HashManager {
    * @param cave - 主 `cave` 命令实例。
    */
   public registerCommands(cave) {
+    const adminCheck = ({ session }) => {
+      const adminChannelId = this.config.adminChannel?.split(':')[1];
+      if (session.channelId !== adminChannelId) {
+        return '此指令仅限在管理群组中使用';
+      }
+    };
+
     cave.subcommand('.hash', '校验回声洞')
-      .usage('校验所有回声洞，为历史数据生成哈希，并检查现有内容的相似度。')
-      .action(async ({ session }) => {
-        const adminChannelId = this.config.adminChannel?.split(':')[1];
-        if (session.channelId !== adminChannelId) {
-          return '此指令仅限在管理群组中使用';
-        }
-        await session.send('正在处理，请稍候...');
+      .usage('校验所有回声洞，补全所有哈希记录。')
+      .action(async (argv) => {
+        const checkResult = adminCheck(argv);
+        if (checkResult) return checkResult;
+
+        await argv.session.send('正在处理，请稍候...');
         try {
-          return await this.validateAllCaves();
+          return await this.generateHashesForHistoricalCaves();
         } catch (error) {
-          this.logger.error('校验哈希失败:', error);
-          return `校验失败: ${error.message}`;
+          this.logger.error('生成历史哈希失败:', error);
+          return `操作失败: ${error.message}`;
+        }
+      });
+
+    cave.subcommand('.check', '检查回声洞')
+      .usage('检查所有已存在哈希的回声洞的相似度。')
+      .action(async (argv) => {
+        const checkResult = adminCheck(argv);
+        if (checkResult) return checkResult;
+
+        await argv.session.send('正在检查，请稍候...');
+        try {
+          return await this.checkForSimilarCaves();
+        } catch (error) {
+          this.logger.error('检查相似度失败:', error);
+          return `检查失败: ${error.message}`;
         }
       });
   }
 
   /**
-   * @description 检查数据库中所有回声洞，为没有哈希记录的历史数据生成哈希，并在此之后对所有内容进行相似度检查。
+   * @description 检查数据库中所有回声洞，为没有哈希记录的历史数据生成哈希。
    * @returns {Promise<string>} 一个包含操作结果的报告字符串。
    */
-  public async validateAllCaves(): Promise<string> {
+  public async generateHashesForHistoricalCaves(): Promise<string> {
     const allCaves = await this.ctx.database.get('cave', { status: 'active' });
     const existingHashedCaveIds = new Set((await this.ctx.database.get('cave_hash', {}, { fields: ['cave'] })).map(h => h.cave));
 
@@ -117,10 +138,16 @@ export class HashManager {
     }
     await flushHashes();
 
-    const generationReport = totalHashesGenerated > 0
-      ? `已补全 ${historicalCount} 个回声洞的 ${totalHashesGenerated} 条哈希\n`
-      : '无需补全回声洞的哈希\n';
+    return totalHashesGenerated > 0
+      ? `已补全 ${historicalCount} 个回声洞的 ${totalHashesGenerated} 条哈希`
+      : '无需补全回声洞哈希';
+  }
 
+  /**
+   * @description 对所有已存在哈希的回声洞进行相似度检查。
+   * @returns {Promise<string>} 一个包含操作结果的报告字符串。
+   */
+  public async checkForSimilarCaves(): Promise<string> {
     const allHashes = await this.ctx.database.get('cave_hash', {});
     const caveTextHashes = new Map<number, string>();
     const caveImagePHashes = new Map<number, string[]>();
@@ -134,7 +161,7 @@ export class HashManager {
       }
     }
 
-    const caveIds = allCaves.map(c => c.id);
+    const caveIds = Array.from(new Set([...caveTextHashes.keys(), ...caveImagePHashes.keys()]));
     const similarPairs = new Set<string>();
 
     for (let i = 0; i < caveIds.length; i++) {
@@ -142,15 +169,17 @@ export class HashManager {
         const id1 = caveIds[i];
         const id2 = caveIds[j];
 
+        // 比较文本相似度
         const textHash1 = caveTextHashes.get(id1);
         const textHash2 = caveTextHashes.get(id2);
         if (textHash1 && textHash2) {
           const textSim = this.calculateSimilarity(textHash1, textHash2);
           if (textSim >= this.config.textThreshold) {
-            similarPairs.add(`文本:（${id1}，${id2}），相似度：${(textSim * 100).toFixed(2)}%`);
+            similarPairs.add(`文本${id1}&${id2}=${(textSim * 100).toFixed(2)}%`);
           }
         }
 
+        // 比较图片相似度
         const imageHashes1 = caveImagePHashes.get(id1) || [];
         const imageHashes2 = caveImagePHashes.get(id2) || [];
         if (imageHashes1.length > 0 && imageHashes2.length > 0) {
@@ -158,7 +187,7 @@ export class HashManager {
             for (const imgHash2 of imageHashes2) {
               const imgSim = this.calculateSimilarity(imgHash1, imgHash2);
               if (imgSim >= this.config.imageThreshold) {
-                similarPairs.add(`图片:（${id1}，${id2}），相似度：${(imgSim * 100).toFixed(2)}%`);
+                similarPairs.add(`图片${id1}&${id2}=${(imgSim * 100).toFixed(2)}%`);
               }
             }
           }
@@ -166,11 +195,9 @@ export class HashManager {
       }
     }
 
-    const similarityReport = similarPairs.size > 0
-      ? `发现 ${similarPairs.size} 对高相似度内容:\n` + [...similarPairs].join('\n')
+    return similarPairs.size > 0
+      ? `已发现 ${similarPairs.size} 对高相似度内容:\n` + [...similarPairs].join('\n')
       : '未发现高相似度内容';
-
-    return `校验完成:\n${generationReport}${similarityReport}`;
   }
 
   /**
