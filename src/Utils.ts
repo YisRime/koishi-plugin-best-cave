@@ -6,7 +6,6 @@ import { HashManager } from './HashManager';
 import { ReviewManager } from './ReviewManager';
 
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
-const MAX_ID_FLAG = 0;
 
 /**
  * @description 将数据库存储的 StoredElement[] 转换为 Koishi 的 h() 元素数组。
@@ -82,7 +81,7 @@ export async function cleanupPendingDeletions(ctx: Context, fileManager: FileMan
       await Promise.all(cave.elements.filter(el => el.file).map(el => fileManager.deleteFile(el.file)));
     }
 
-    reusableIds.delete(MAX_ID_FLAG);
+    reusableIds.delete(0);
     idsToDelete.forEach(id => reusableIds.add(id));
 
     await ctx.database.remove('cave', { id: { $in: idsToDelete } });
@@ -113,17 +112,17 @@ export function getScopeQuery(session: Session, config: Config, includeStatus = 
  */
 export async function getNextCaveId(ctx: Context, query: object = {}, reusableIds: Set<number>): Promise<number> {
   for (const id of reusableIds) {
-    if (id > MAX_ID_FLAG) {
+    if (id > 0) {
       reusableIds.delete(id);
       return id;
     }
   }
 
-  if (reusableIds.has(MAX_ID_FLAG)) {
-    reusableIds.delete(MAX_ID_FLAG);
+  if (reusableIds.has(0)) {
+    reusableIds.delete(0);
     const [lastCave] = await ctx.database.get('cave', query, { sort: { id: 'desc' }, limit: 1 });
     const newId = (lastCave?.id || 0) + 1;
-    reusableIds.add(MAX_ID_FLAG);
+    reusableIds.add(0);
     return newId;
   }
 
@@ -133,7 +132,7 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
   while (existingIds.has(newId)) newId++;
 
   if (existingIds.size === (allCaveIds.length > 0 ? Math.max(...allCaveIds) : 0)) {
-    reusableIds.add(MAX_ID_FLAG);
+    reusableIds.add(0);
   }
 
   return newId;

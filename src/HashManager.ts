@@ -9,8 +9,6 @@ import * as crypto from 'crypto';
  * @description 封装了所有与文本和图片哈希生成、相似度比较、以及相关命令的功能。
  */
 export class HashManager {
-  private static readonly HASH_BATCH_SIZE = 1000;
-  private static readonly SIMHASH_BITS = 64;
 
   /**
    * @constructor
@@ -67,19 +65,21 @@ export class HashManager {
     let hashesToInsert: CaveHashObject[] = [];
     let historicalCount = 0;
     let totalHashesGenerated = 0;
+    let batchStartCaveCount = 0;
 
     const flushHashes = async () => {
       if (hashesToInsert.length > 0) {
+        this.logger.info(`补全第 ${batchStartCaveCount + 1} 到 ${historicalCount} 条回声洞哈希中...`);
         await this.ctx.database.upsert('cave_hash', hashesToInsert);
         totalHashesGenerated += hashesToInsert.length;
         hashesToInsert = [];
+        batchStartCaveCount = historicalCount;
       }
     };
 
     for (const cave of allCaves) {
       if (existingHashedCaveIds.has(cave.id)) continue;
 
-      this.logger.info(`正在为回声洞（${cave.id}）生成哈希...`);
       historicalCount++;
 
       const combinedText = cave.elements.filter(el => el.type === 'text' && el.content).map(el => el.content).join(' ');
@@ -99,7 +99,7 @@ export class HashManager {
         }
       }
 
-      if (hashesToInsert.length >= HashManager.HASH_BATCH_SIZE) await flushHashes();
+      if (hashesToInsert.length >= 100) await flushHashes();
     }
     await flushHashes();
 
@@ -238,10 +238,10 @@ export class HashManager {
     const tokens = text.toLowerCase().split(/[^a-z0-9\u4e00-\u9fa5]+/).filter(Boolean);
     if (tokens.length === 0) return '';
 
-    const vector = new Array(HashManager.SIMHASH_BITS).fill(0);
+    const vector = new Array(64).fill(0);
     tokens.forEach(token => {
       const hash = crypto.createHash('md5').update(token).digest();
-      for (let i = 0; i < HashManager.SIMHASH_BITS; i++) {
+      for (let i = 0; i < 64; i++) {
         vector[i] += (hash[Math.floor(i / 8)] >> (i % 8)) & 1 ? 1 : -1;
       }
     });
