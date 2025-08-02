@@ -54,14 +54,12 @@ export class ReviewManager {
         if (!targetCave) return `回声洞（${id}）不存在`;
         if (targetCave.status !== 'pending') return `回声洞（${id}）无需审核`;
 
-        return [`待审核：`, ...await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger)];
+        return [`待审核`, ...await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger)];
       });
 
     const createReviewAction = (actionType: 'approve' | 'reject') => async ({ session }, id: number) => {
       const adminError = requireAdmin(session);
       if (adminError) return adminError;
-
-      await session.send('正在处理，请稍候...');
 
       try {
         if (!id) {
@@ -107,7 +105,7 @@ export class ReviewManager {
     }
 
     try {
-      const reviewMessage = [`待审核：`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
+      const reviewMessage = [`待审核`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
       await this.ctx.broadcast([this.config.adminChannel], h.normalize(reviewMessage));
     } catch (error) {
       this.logger.error(`发送回声洞（${cave.id}）审核消息失败:`, error);

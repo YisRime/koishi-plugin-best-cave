@@ -1,7 +1,8 @@
 import { Context, h, Logger, Session } from 'koishi';
 import * as path from 'path';
-import { CaveObject, Config, StoredElement } from './index';
+import { CaveObject, Config, StoredElement, CaveHashObject } from './index';
 import { FileManager } from './FileManager';
+import { HashManager } from './HashManager';
 
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
 
@@ -90,6 +91,7 @@ export async function cleanupPendingDeletions(ctx: Context, fileManager: FileMan
       reusableIds.add(cave.id);
       reusableIds.delete(MAX_ID_FLAG);
       await ctx.database.remove('cave', { id: cave.id });
+      await ctx.database.remove('cave_hash', { cave: cave.id });
     }
   } catch (error) {
     logger.error('清理回声洞时发生错误:', error);
@@ -228,35 +230,88 @@ export async function processMessageElements(sourceElements: h[], newId: number,
 }
 
 /**
- * @description 异步处理文件上传和状态更新的后台任务。
+ * @description 异步处理文件上传、查重和状态更新的后台任务。
  * @param ctx - Koishi 上下文。
  * @param config - 插件配置。
- * @param fileManager - 文件管理器实例。
+ * @param fileManager - FileManager 实例，用于保存文件。
  * @param logger - 日志记录器实例。
- * @param reviewManager - 审核管理器实例 (可能为 null)。
- * @param cave - 已创建的、状态为 'preload' 的回声洞对象。
- * @param mediaToSave - 需要下载和保存的媒体文件列表。
- * @param reusableIds 可复用 ID 的内存缓存。
+ * @param reviewManager - ReviewManager 实例，用于提交审核。
+ * @param cave - 刚刚在数据库中创建的 `preload` 状态的回声洞对象。
+ * @param mediaToSave - 需要下载和处理的媒体文件列表。
+ * @param reusableIds - 可复用 ID 的内存缓存。
+ * @param session - 触发此操作的用户会话，用于发送反馈。
+ * @param hashManager - HashManager 实例，如果启用则用于哈希计算和比较。
+ * @param textHashesToStore - 已预先计算好的、待存入数据库的文本哈希对象数组。
  */
-export async function handleFileUploads(ctx: Context, config: Config, fileManager: FileManager, logger: Logger, reviewManager: any, cave: CaveObject, mediaToSave: { sourceUrl: string, fileName: string }[], reusableIds: Set<number>) {
+export async function handleFileUploads(ctx: Context, config: Config, fileManager: FileManager, logger: Logger, reviewManager: any, cave: CaveObject, mediaToSave: { sourceUrl: string, fileName: string }[], reusableIds: Set<number>, session: Session, hashManager: HashManager | null, textHashesToStore: Omit<CaveHashObject, 'cave'>[]) {
   try {
-    const uploadPromises = mediaToSave.map(async (media) => {
-      const response = await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 });
-      await fileManager.saveFile(media.fileName, Buffer.from(response));
-    });
-    await Promise.all(uploadPromises);
+    const downloadedMedia: { fileName: string, buffer: Buffer }[] = [];
+    const imageHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
+    let allNewImageHashes: string[] = [];
+
+    if (hashManager) {
+      for (const media of mediaToSave) {
+        const response = await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 });
+        const buffer = Buffer.from(response);
+        downloadedMedia.push({ fileName: media.fileName, buffer });
+
+        const isImage = ['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(media.fileName).toLowerCase());
+        if (isImage) {
+          const pHash = await hashManager.generateImagePHash(buffer);
+          const subHashes = [...await hashManager.generateImageSubHashes(buffer)];
+
+          allNewImageHashes.push(pHash, ...subHashes);
+
+          imageHashesToStore.push({ hash: pHash, type: 'image', subType: 'pHash' });
+          subHashes.forEach(sh => imageHashesToStore.push({ hash: sh, type: 'image', subType: 'subImage' }));
+        }
+      }
+
+      // 进行图片相似度校验
+      if (allNewImageHashes.length > 0) {
+        const existingImageHashes = await ctx.database.get('cave_hash', { type: 'image' });
+        for (const newHash of allNewImageHashes) {
+          for (const existing of existingImageHashes) {
+            const similarity = hashManager.calculateImageSimilarity(newHash, existing.hash);
+            if (similarity >= config.imageThreshold) {
+              await session.send(`图片与回声洞（${existing.cave}）的相似度（${(similarity * 100).toFixed(2)}%）过高`);
+              await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
+              cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
+              return; // 终止后续操作
+            }
+          }
+        }
+      }
+    } else {
+      // 如果未启用哈希，正常下载文件
+      for (const media of mediaToSave) {
+        const response = await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 });
+        downloadedMedia.push({ fileName: media.fileName, buffer: Buffer.from(response) });
+      }
+    }
+
+    await Promise.all(downloadedMedia.map(item => fileManager.saveFile(item.fileName, item.buffer)));
 
     const finalStatus = config.enableReview ? 'pending' : 'active';
     await ctx.database.upsert('cave', [{ id: cave.id, status: finalStatus }]);
+
+    if (hashManager) {
+      const allHashesToInsert = [
+        ...textHashesToStore.map(h => ({ ...h, cave: cave.id })),
+        ...imageHashesToStore.map(h => ({ ...h, cave: cave.id }))
+      ];
+      if (allHashesToInsert.length > 0) {
+        await ctx.database.upsert('cave_hash', allHashesToInsert);
+      }
+    }
 
     if (finalStatus === 'pending' && reviewManager) {
       const [finalCave] = await ctx.database.get('cave', { id: cave.id });
       if (finalCave) reviewManager.sendForReview(finalCave);
     }
-  } catch (fileSaveError) {
-    logger.error(`回声洞（${cave.id}）文件保存失败:`, fileSaveError);
+  } catch (fileProcessingError) {
+    logger.error(`回声洞（${cave.id}）文件处理失败:`, fileProcessingError);
     await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
-    // 异步清理，不阻塞主流程
     cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
   }
 }

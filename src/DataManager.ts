@@ -101,6 +101,7 @@ export class DataManager {
     await this.ctx.database.upsert('cave', newCavesToInsert);
 
     this.reusableIds.clear();
+    await this.ctx.database.remove('cave_hash', {});
 
     return `成功导入 ${newCavesToInsert.length} 条数据`;
   }

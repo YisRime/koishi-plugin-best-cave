@@ -3,6 +3,7 @@ import { FileManager } from './FileManager'
 import { ProfileManager } from './ProfileManager'
 import { DataManager } from './DataManager'
 import { ReviewManager } from './ReviewManager'
+import { HashManager } from './HashManager'
 import * as utils from './Utils'
 
 export const name = 'best-cave'
@@ -47,10 +48,21 @@ export interface CaveObject {
   time: Date;
 }
 
-// 扩展 Koishi 数据库表接口，以获得 'cave' 表的类型提示。
+/**
+ * @description 数据库 `cave_hash` 表的完整对象模型。
+ */
+export interface CaveHashObject {
+  cave: number;
+  hash: string;
+  type: 'text' | 'image';
+  subType: 'shingle' | 'pHash' | 'subImage';
+}
+
+// 扩展 Koishi 数据库表接口，以获得类型提示。
 declare module 'koishi' {
   interface Tables {
-    cave: CaveObject
+    cave: CaveObject;
+    cave_hash: CaveHashObject;
   }
 }
 
@@ -64,6 +76,9 @@ export interface Config {
   enableIO: boolean;
   enableReview: boolean;
   caveFormat: string;
+  enableSimilarity: boolean;
+  textThreshold: number;
+  imageThreshold: number;
   localPath?: string;
   enableS3: boolean;
   endpoint?: string;
@@ -85,7 +100,10 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("基础配置"),
   Schema.object({
     enableReview: Schema.boolean().default(false).description("启用审核"),
-  }).description('审核配置'),
+    enableSimilarity: Schema.boolean().default(false).description("启用查重"),
+    textThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('文本相似度阈值'),
+    imageThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('图片相似度阈值'),
+  }).description('审核与查重配置'),
   Schema.object({
     localPath: Schema.string().description('文件映射路径'),
     enableS3: Schema.boolean().default(false).description("启用 S3 存储"),
@@ -111,6 +129,17 @@ export function apply(ctx: Context, config: Config) {
     time: 'timestamp',
   }, { primary: 'id' });
 
+  // 扩展 'cave_hash' 数据表模型
+  ctx.model.extend('cave_hash', {
+    cave: 'unsigned',
+    hash: 'string',
+    type: 'string',
+    subType: 'string',
+  }, {
+    primary: ['cave', 'hash', 'subType'],
+  });
+
+
   // --- 初始化管理器 ---
   const fileManager = new FileManager(ctx.baseDir, config, logger);
   const lastUsed = new Map<string, number>();
@@ -118,6 +147,7 @@ export function apply(ctx: Context, config: Config) {
   const profileManager = config.enableProfile ? new ProfileManager(ctx) : null;
   const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger, reusableIds) : null;
   const reviewManager = config.enableReview ? new ReviewManager(ctx, config, fileManager, logger, reusableIds) : null;
+  const hashManager = config.enableSimilarity ? new HashManager(ctx, config, logger, fileManager) : null;
 
   // --- 指令定义 ---
   const cave = ctx.command('cave', '回声洞')
@@ -167,7 +197,7 @@ export function apply(ctx: Context, config: Config) {
         if (!sourceElements) {
             await session.send("请在一分钟内发送你要添加的内容");
             const reply = await session.prompt(60000);
-            if (!reply) return "操作超时，已取消添加";
+            if (!reply) return "等待操作超时";
             sourceElements = h.parse(reply);
         }
 
@@ -179,7 +209,33 @@ export function apply(ctx: Context, config: Config) {
         );
 
         if (finalElementsForDb.length === 0) {
-          return "内容为空，已取消添加";
+          return "无可添加内容";
+        }
+
+        // --- 相似度校验 ---
+        let textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
+        if (hashManager) {
+          const textContents = finalElementsForDb
+            .filter(el => el.type === 'text' && el.content)
+            .map(el => el.content);
+
+          if (textContents.length > 0) {
+            const newTextHashes = textContents.map(text => hashManager.generateTextHash(text));
+            textHashesToStore = newTextHashes.map(hash => ({ hash, type: 'text', subType: 'shingle' }));
+
+            // 查找相似文本
+            const existingTextHashes = await ctx.database.get('cave_hash', { type: 'text', hash: { $in: newTextHashes } });
+
+            for (const existing of existingTextHashes) {
+                const matchedNewHash = textHashesToStore.find(h => h.hash === existing.hash);
+                if(matchedNewHash){
+                    const similarity = hashManager.calculateTextSimilarity(matchedNewHash.hash, existing.hash);
+                    if (similarity >= config.textThreshold) {
+                        return `内容与回声洞（${existing.cave}）的相似度（${(similarity * 100).toFixed(2)}%）过高`;
+                    }
+                }
+            }
+          }
         }
 
         const userName = (config.enableProfile ? await profileManager.getNickname(session.userId) : null) || session.username;
@@ -198,9 +254,15 @@ export function apply(ctx: Context, config: Config) {
         await ctx.database.create('cave', newCave);
 
         if (hasMedia) {
-          utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave, reusableIds);
-        } else if (initialStatus === 'pending') {
-          reviewManager.sendForReview(newCave);
+          utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave, reusableIds, session, hashManager, textHashesToStore);
+        } else {
+          if (hashManager && textHashesToStore.length > 0) {
+            const hashObjectsToInsert = textHashesToStore.map(h => ({ ...h, cave: newId }));
+            await ctx.database.upsert('cave_hash', hashObjectsToInsert);
+          }
+          if (initialStatus === 'pending') {
+            reviewManager.sendForReview(newCave);
+          }
         }
 
         const responseMessage = (initialStatus === 'pending' || (initialStatus === 'preload' && config.enableReview))
@@ -278,4 +340,5 @@ export function apply(ctx: Context, config: Config) {
   if (profileManager) profileManager.registerCommands(cave);
   if (dataManager) dataManager.registerCommands(cave);
   if (reviewManager) reviewManager.registerCommands(cave);
+  if (hashManager) hashManager.registerCommands(cave);
 }
