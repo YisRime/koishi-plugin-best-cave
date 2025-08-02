@@ -1,16 +1,11 @@
 import { Context } from 'koishi'
 
-/**
- * @description 数据库 `cave_user` 表的结构定义。
- * @property userId 用户唯一ID，作为主键。
- * @property nickname 用户自定义的昵称。
- */
+/** 数据库 `cave_user` 表的结构。 */
 export interface UserProfile {
   userId: string;
   nickname: string;
 }
 
-// 扩展 Koishi 的 Tables 接口，以便 `ctx.database` 能正确提示 `cave_user` 表类型。
 declare module 'koishi' {
   interface Tables {
     cave_user: UserProfile;
@@ -20,21 +15,18 @@ declare module 'koishi' {
 /**
  * @class ProfileManager
  * @description 负责管理用户在回声洞中的自定义昵称。
- * 当插件配置 `enableProfile` 为 true 时实例化。
  */
 export class ProfileManager {
-
   /**
    * @constructor
    * @param ctx - Koishi 上下文，用于初始化数据库模型。
    */
   constructor(private ctx: Context) {
-    // 扩展 `cave_user` 表模型，定义其结构和主键。
     this.ctx.model.extend('cave_user', {
-      userId: 'string',   // 用户 ID
-      nickname: 'string', // 用户自定义昵称
+      userId: 'string',
+      nickname: 'string',
     }, {
-      primary: 'userId', // 保证每个用户只有一条昵称记录。
+      primary: 'userId',
     });
   }
 
@@ -44,7 +36,7 @@ export class ProfileManager {
    */
   public registerCommands(cave) {
     cave.subcommand('.profile [nickname:text]', '设置显示昵称')
-      .usage('设置你在回声洞中显示的昵称。若不提供昵称，则清除现有昵称。')
+      .usage('设置在回声洞中显示的昵称。若不提供昵称，则清除现有昵称。')
       .action(async ({ session }, nickname) => {
         const trimmedNickname = nickname?.trim();
         if (trimmedNickname) {
@@ -68,10 +60,10 @@ export class ProfileManager {
   /**
    * @description 获取指定用户的昵称。
    * @param userId - 目标用户的 ID。
-   * @returns 返回用户的昵称字符串，如果未设置则返回 null。
+   * @returns 用户的昵称字符串或 null。
    */
   public async getNickname(userId: string): Promise<string | null> {
-    const [profile] = await this.ctx.database.get('cave_user', { userId }, { fields: ['nickname'] });
+    const [profile] = await this.ctx.database.get('cave_user', { userId });
     return profile?.nickname ?? null;
   }
 

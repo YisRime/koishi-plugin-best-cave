@@ -43,7 +43,7 @@ export class FileManager {
    * @template T 异步操作的返回类型。
    * @param fullPath 需要加锁的文件的完整路径。
    * @param operation 要执行的异步函数。
-   * @returns 返回异步操作的结果。
+   * @returns 异步操作的结果。
    */
   private async withLock<T>(fullPath: string, operation: () => Promise<T>): Promise<T> {
     while (this.locks.has(fullPath)) {
@@ -60,7 +60,7 @@ export class FileManager {
    * @description 保存文件，自动选择 S3 或本地存储。
    * @param fileName 用作 S3 Key 或本地文件名。
    * @param data 要写入的 Buffer 数据。
-   * @returns 返回保存时使用的文件名/标识符。
+   * @returns 保存时使用的文件名。
    */
   public async saveFile(fileName: string, data: Buffer): Promise<string> {
     if (this.s3Client) {
@@ -105,8 +105,7 @@ export class FileManager {
   public async deleteFile(fileIdentifier: string): Promise<void> {
     try {
       if (this.s3Client) {
-        const command = new DeleteObjectCommand({ Bucket: this.s3Bucket, Key: fileIdentifier });
-        await this.s3Client.send(command);
+        await this.s3Client.send(new DeleteObjectCommand({ Bucket: this.s3Bucket, Key: fileIdentifier }));
       } else {
         const filePath = path.join(this.resourceDir, fileIdentifier);
         await this.withLock(filePath, () => fs.unlink(filePath));

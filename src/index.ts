@@ -9,7 +9,6 @@ import * as utils from './Utils'
 export const name = 'best-cave'
 export const inject = ['database']
 
-// 插件使用说明
 export const usage = `
 <div style="border-radius: 10px; border: 1px solid #ddd; padding: 16px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
   <h2 style="margin-top: 0; color: #4a6ee0;">📌 插件说明</h2>
@@ -24,15 +23,13 @@ export const usage = `
 `
 const logger = new Logger('best-cave');
 
-// --- 数据类型定义 ---
-
 /**
  * @description 存储在数据库中的单个消息元素。
  */
 export interface StoredElement {
   type: 'text' | 'image' | 'video' | 'audio' | 'file';
   content?: string; // 文本内容
-  file?: string;    // 媒体文件的标识符 (本地文件名或S3 Key)
+  file?: string;    // 媒体文件的标识符 (本地文件名或 S3 Key)
 }
 
 /**
@@ -54,19 +51,15 @@ export interface CaveObject {
 export interface CaveHashObject {
   cave: number;
   hash: string;
-  type: 'text' | 'image';
-  subType: 'shingle' | 'pHash' | 'subImage';
+  type: 'sim' | 'phash' | 'sub';
 }
 
-// 扩展 Koishi 数据库表接口，以获得类型提示。
 declare module 'koishi' {
   interface Tables {
     cave: CaveObject;
     cave_hash: CaveHashObject;
   }
 }
-
-// --- 插件配置 ---
 
 export interface Config {
   coolDown: number;
@@ -103,7 +96,7 @@ export const Config: Schema<Config> = Schema.intersect([
     enableSimilarity: Schema.boolean().default(false).description("启用查重"),
     textThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('文本相似度阈值'),
     imageThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('图片相似度阈值'),
-  }).description('审核与查重配置'),
+  }).description('复核配置'),
   Schema.object({
     localPath: Schema.string().description('文件映射路径'),
     enableS3: Schema.boolean().default(false).description("启用 S3 存储"),
@@ -116,9 +109,7 @@ export const Config: Schema<Config> = Schema.intersect([
   }).description("存储配置"),
 ]);
 
-// --- 插件主逻辑 ---
 export function apply(ctx: Context, config: Config) {
-  // 扩展 'cave' 数据表模型
   ctx.model.extend('cave', {
     id: 'unsigned',
     elements: 'json',
@@ -129,27 +120,14 @@ export function apply(ctx: Context, config: Config) {
     time: 'timestamp',
   }, { primary: 'id' });
 
-  // 扩展 'cave_hash' 数据表模型
-  ctx.model.extend('cave_hash', {
-    cave: 'unsigned',
-    hash: 'string',
-    type: 'string',
-    subType: 'string',
-  }, {
-    primary: ['cave', 'hash', 'subType'],
-  });
-
-
-  // --- 初始化管理器 ---
   const fileManager = new FileManager(ctx.baseDir, config, logger);
   const lastUsed = new Map<string, number>();
   const reusableIds = new Set<number>();
   const profileManager = config.enableProfile ? new ProfileManager(ctx) : null;
-  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger, reusableIds) : null;
   const reviewManager = config.enableReview ? new ReviewManager(ctx, config, fileManager, logger, reusableIds) : null;
   const hashManager = config.enableSimilarity ? new HashManager(ctx, config, logger, fileManager) : null;
+  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger, hashManager) : null;
 
-  // --- 指令定义 ---
   const cave = ctx.command('cave', '回声洞')
     .option('add', '-a <content:text> 添加回声洞')
     .option('view', '-g <id:posint> 查看指定回声洞')
@@ -157,7 +135,6 @@ export function apply(ctx: Context, config: Config) {
     .option('list', '-l 查询投稿统计')
     .usage('随机抽取一条已添加的回声洞。')
     .action(async ({ session, options }) => {
-      // 选项快捷方式
       if (options.add) return session.execute(`cave.add ${options.add}`);
       if (options.view) return session.execute(`cave.view ${options.view}`);
       if (options.delete) return session.execute(`cave.del ${options.delete}`);
@@ -172,10 +149,8 @@ export function apply(ctx: Context, config: Config) {
         if (!candidates.length) {
           return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
         }
-
         const randomId = candidates[Math.floor(Math.random() * candidates.length)].id;
         const [randomCave] = await ctx.database.get('cave', { ...query, id: randomId });
-
         utils.updateCooldownTimestamp(session, config, lastUsed);
         return utils.buildCaveMessage(randomCave, config, fileManager, logger);
       } catch (error) {
@@ -184,10 +159,8 @@ export function apply(ctx: Context, config: Config) {
       }
     });
 
-  // --- 注册子命令 ---
-
   cave.subcommand('.add [content:text]', '添加回声洞')
-    .usage('添加一条回声洞。可以直接发送内容，也可以回复或引用一条消息。')
+    .usage('添加一条回声洞。可直接发送内容，也可回复或引用消息。')
     .action(async ({ session }, content) => {
       try {
         let sourceElements = session.quote?.elements;
@@ -201,40 +174,28 @@ export function apply(ctx: Context, config: Config) {
             sourceElements = h.parse(reply);
         }
 
-        const idScopeQuery = config.perChannel && session.channelId ? { channelId: session.channelId } : {};
-        const newId = await utils.getNextCaveId(ctx, idScopeQuery, reusableIds);
+        const newId = await utils.getNextCaveId(ctx, utils.getScopeQuery(session, config, false), reusableIds);
+        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session);
+        if (finalElementsForDb.length === 0) return "无可添加内容";
 
-        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(
-          sourceElements, newId, session.channelId, session.userId
-        );
-
-        if (finalElementsForDb.length === 0) {
-          return "无可添加内容";
-        }
-
-        // --- 相似度校验 ---
-        let textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
+        const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
         if (hashManager) {
-          const textContents = finalElementsForDb
+          const combinedText = finalElementsForDb
             .filter(el => el.type === 'text' && el.content)
-            .map(el => el.content);
+            .map(el => el.content)
+            .join(' ');
 
-          if (textContents.length > 0) {
-            const newTextHashes = textContents.map(text => hashManager.generateTextHash(text));
-            textHashesToStore = newTextHashes.map(hash => ({ hash, type: 'text', subType: 'shingle' }));
-
-            // 查找相似文本
-            const existingTextHashes = await ctx.database.get('cave_hash', { type: 'text', hash: { $in: newTextHashes } });
+          if (combinedText) {
+            const newSimhash = hashManager.generateTextSimhash(combinedText);
+            const existingTextHashes = await ctx.database.get('cave_hash', { type: 'sim' });
 
             for (const existing of existingTextHashes) {
-                const matchedNewHash = textHashesToStore.find(h => h.hash === existing.hash);
-                if(matchedNewHash){
-                    const similarity = hashManager.calculateTextSimilarity(matchedNewHash.hash, existing.hash);
-                    if (similarity >= config.textThreshold) {
-                        return `内容与回声洞（${existing.cave}）的相似度（${(similarity * 100).toFixed(2)}%）过高`;
-                    }
-                }
+              const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
+              if (similarity >= config.textThreshold) {
+                return `内容与回声洞（${existing.cave}）的相似度（${(similarity * 100).toFixed(2)}%）过高`;
+              }
             }
+            textHashesToStore.push({ hash: newSimhash, type: 'sim' });
           }
         }
 
@@ -242,7 +203,7 @@ export function apply(ctx: Context, config: Config) {
         const hasMedia = mediaToSave.length > 0;
         const initialStatus = hasMedia ? 'preload' : (config.enableReview ? 'pending' : 'active');
 
-        const newCave: CaveObject = {
+        const newCave = await ctx.database.create('cave', {
           id: newId,
           elements: finalElementsForDb,
           channelId: session.channelId,
@@ -250,27 +211,22 @@ export function apply(ctx: Context, config: Config) {
           userName,
           status: initialStatus,
           time: new Date(),
-        };
-        await ctx.database.create('cave', newCave);
+        });
 
         if (hasMedia) {
           utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave, reusableIds, session, hashManager, textHashesToStore);
         } else {
           if (hashManager && textHashesToStore.length > 0) {
-            const hashObjectsToInsert = textHashesToStore.map(h => ({ ...h, cave: newId }));
-            await ctx.database.upsert('cave_hash', hashObjectsToInsert);
+            await ctx.database.upsert('cave_hash', textHashesToStore.map(h => ({ ...h, cave: newCave.id })));
           }
           if (initialStatus === 'pending') {
             reviewManager.sendForReview(newCave);
           }
         }
 
-        const responseMessage = (initialStatus === 'pending' || (initialStatus === 'preload' && config.enableReview))
-          ? `提交成功，序号为（${newId}）`
-          : `添加成功，序号为（${newId}）`;
-
-        return responseMessage;
-
+        return (initialStatus === 'pending' || (initialStatus === 'preload' && config.enableReview))
+          ? `提交成功，序号为（${newCave.id}）`
+          : `添加成功，序号为（${newCave.id}）`;
       } catch (error) {
         logger.error('添加回声洞失败:', error);
         return '添加失败，请稍后再试';
@@ -278,14 +234,12 @@ export function apply(ctx: Context, config: Config) {
     });
 
   cave.subcommand('.view <id:posint>', '查看指定回声洞')
-    .usage('通过序号查看对应的回声洞。')
     .action(async ({ session }, id) => {
       if (!id) return '请输入要查看的回声洞序号';
       const cdMessage = utils.checkCooldown(session, config, lastUsed);
       if (cdMessage) return cdMessage;
       try {
-        const query = { ...utils.getScopeQuery(session, config), id };
-        const [targetCave] = await ctx.database.get('cave', query);
+        const [targetCave] = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), id });
         if (!targetCave) return `回声洞（${id}）不存在`;
         utils.updateCooldownTimestamp(session, config, lastUsed);
         return utils.buildCaveMessage(targetCave, config, fileManager, logger);
@@ -296,24 +250,19 @@ export function apply(ctx: Context, config: Config) {
     });
 
   cave.subcommand('.del <id:posint>', '删除指定回声洞')
-    .usage('通过序号删除对应的回声洞。')
     .action(async ({ session }, id) => {
       if (!id) return '请输入要删除的回声洞序号';
       try {
         const [targetCave] = await ctx.database.get('cave', { id, status: 'active' });
         if (!targetCave) return `回声洞（${id}）不存在`;
 
-        const adminChannelId = config.adminChannel?.split(':')[1];
         const isAuthor = targetCave.userId === session.userId;
-        const isAdmin = session.channelId === adminChannelId;
+        const isAdmin = session.channelId === config.adminChannel?.split(':')[1];
+        if (!isAuthor && !isAdmin) return '你没有权限删除这条回声洞';
 
-        if (!isAuthor && !isAdmin) {
-          return '你没有权限删除这条回声洞';
-        }
-
-        await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
+        await ctx.database.upsert('cave', [{ id, status: 'delete' }]);
         const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
-        utils.cleanupPendingDeletions(ctx, fileManager, logger, reusableIds); // 异步清理
+        utils.cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
         return [`已删除`, ...caveMessage];
       } catch (error) {
         logger.error(`标记回声洞（${id}）失败:`, error);
@@ -322,11 +271,9 @@ export function apply(ctx: Context, config: Config) {
     });
 
   cave.subcommand('.list', '查询我的投稿')
-    .usage('查询并列出你所有投稿的回声洞序号。')
     .action(async ({ session }) => {
       try {
-        const query = { ...utils.getScopeQuery(session, config), userId: session.userId };
-        const userCaves = await ctx.database.get('cave', query, { fields: ['id'] });
+        const userCaves = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), userId: session.userId });
         if (!userCaves.length) return '你还没有投稿过回声洞';
         const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join(', ');
         return `你已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;
@@ -336,7 +283,6 @@ export function apply(ctx: Context, config: Config) {
       }
     });
 
-  // --- 条件化注册子模块 ---
   if (profileManager) profileManager.registerCommands(cave);
   if (dataManager) dataManager.registerCommands(cave);
   if (reviewManager) reviewManager.registerCommands(cave);

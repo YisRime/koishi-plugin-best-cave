@@ -2,12 +2,15 @@ import { Context, Logger } from 'koishi';
 import { Config, CaveHashObject } from './index';
 import sharp from 'sharp';
 import { FileManager } from './FileManager';
+import * as crypto from 'crypto';
 
 /**
  * @class HashManager
  * @description 封装了所有与文本和图片哈希生成、相似度比较、以及相关命令的功能。
  */
 export class HashManager {
+  private static readonly HASH_BATCH_SIZE = 1000;
+  private static readonly SIMHASH_BITS = 64;
 
   /**
    * @constructor
@@ -21,7 +24,15 @@ export class HashManager {
     private config: Config,
     private logger: Logger,
     private fileManager: FileManager,
-  ) {}
+  ) {
+    this.ctx.model.extend('cave_hash', {
+      cave: 'unsigned',
+      hash: 'string',
+      type: 'string',
+    }, {
+      primary: ['cave', 'hash', 'type'],
+    });
+  }
 
   /**
    * @description 注册与哈希校验相关的子命令。
@@ -29,18 +40,15 @@ export class HashManager {
    */
   public registerCommands(cave) {
     cave.subcommand('.hash', '校验回声洞')
-      .usage('校验所有回声洞，为历史数据生成哈希。')
+      .usage('校验所有回声洞，为历史数据生成哈希，并检查现有内容的相似度。')
       .action(async ({ session }) => {
         const adminChannelId = this.config.adminChannel?.split(':')[1];
         if (session.channelId !== adminChannelId) {
           return '此指令仅限在管理群组中使用';
         }
-
         await session.send('正在处理，请稍候...');
-
         try {
-          const report = await this.validateAllCaves();
-          return report;
+          return await this.validateAllCaves();
         } catch (error) {
           this.logger.error('校验哈希失败:', error);
           return `校验失败: ${error.message}`;
@@ -49,16 +57,24 @@ export class HashManager {
   }
 
   /**
-   * @description 检查数据库中所有回声洞，并为没有哈希记录的历史数据生成哈希。
-   * @returns {Promise<string>} 返回一个包含操作结果的报告字符串。
+   * @description 检查数据库中所有回声洞，为没有哈希记录的历史数据生成哈希，并在此之后对所有内容进行相似度检查。
+   * @returns {Promise<string>} 一个包含操作结果的报告字符串。
    */
-  private async validateAllCaves(): Promise<string> {
+  public async validateAllCaves(): Promise<string> {
     const allCaves = await this.ctx.database.get('cave', { status: 'active' });
-    const existingHashes = await this.ctx.database.get('cave_hash', {});
-    const existingHashedCaveIds = new Set(existingHashes.map(h => h.cave));
+    const existingHashedCaveIds = new Set((await this.ctx.database.get('cave_hash', {}, { fields: ['cave'] })).map(h => h.cave));
 
-    const hashesToInsert: CaveHashObject[] = [];
+    let hashesToInsert: CaveHashObject[] = [];
     let historicalCount = 0;
+    let totalHashesGenerated = 0;
+
+    const flushHashes = async () => {
+      if (hashesToInsert.length > 0) {
+        await this.ctx.database.upsert('cave_hash', hashesToInsert);
+        totalHashesGenerated += hashesToInsert.length;
+        hashesToInsert = [];
+      }
+    };
 
     for (const cave of allCaves) {
       if (existingHashedCaveIds.has(cave.id)) continue;
@@ -66,98 +82,123 @@ export class HashManager {
       this.logger.info(`正在为回声洞（${cave.id}）生成哈希...`);
       historicalCount++;
 
-      // 为文本元素生成哈希
-      const textElements = cave.elements.filter(el => el.type === 'text' && el.content);
-      for (const el of textElements) {
-        const textHash = this.generateTextHash(el.content);
-        hashesToInsert.push({ cave: cave.id, hash: textHash, type: 'text', subType: 'shingle' });
+      const combinedText = cave.elements.filter(el => el.type === 'text' && el.content).map(el => el.content).join(' ');
+      if (combinedText) {
+        hashesToInsert.push({ cave: cave.id, hash: this.generateTextSimhash(combinedText), type: 'sim' });
       }
 
-      // 为图片元素生成哈希
-      const imageElements = cave.elements.filter(el => el.type === 'image' && el.file);
-      for (const el of imageElements) {
+      for (const el of cave.elements.filter(el => el.type === 'image' && el.file)) {
         try {
           const imageBuffer = await this.fileManager.readFile(el.file);
-
           const pHash = await this.generateImagePHash(imageBuffer);
-          hashesToInsert.push({ cave: cave.id, hash: pHash, type: 'image', subType: 'pHash' });
-
+          hashesToInsert.push({ cave: cave.id, hash: pHash, type: 'phash' });
           const subHashes = await this.generateImageSubHashes(imageBuffer);
-          subHashes.forEach(subHash => {
-            hashesToInsert.push({ cave: cave.id, hash: subHash, type: 'image', subType: 'subImage' });
-          });
+          subHashes.forEach(subHash => hashesToInsert.push({ cave: cave.id, hash: subHash, type: 'sub' }));
         } catch (e) {
           this.logger.warn(`无法为回声洞（${cave.id}）的内容（${el.file}）生成哈希:`, e);
         }
       }
+
+      if (hashesToInsert.length >= HashManager.HASH_BATCH_SIZE) await flushHashes();
+    }
+    await flushHashes();
+
+    const generationReport = totalHashesGenerated > 0
+      ? `已补全 ${historicalCount} 个回声洞的 ${totalHashesGenerated} 条哈希\n`
+      : '无需补全回声洞的哈希\n';
+
+    const allHashes = await this.ctx.database.get('cave_hash', {});
+    const caveTextHashes = new Map<number, string>();
+    const caveImagePHashes = new Map<number, string[]>();
+
+    for (const hash of allHashes) {
+      if (hash.type === 'sim') {
+        caveTextHashes.set(hash.cave, hash.hash);
+      } else if (hash.type === 'phash') {
+        if (!caveImagePHashes.has(hash.cave)) caveImagePHashes.set(hash.cave, []);
+        caveImagePHashes.get(hash.cave)!.push(hash.hash);
+      }
     }
 
-    if (hashesToInsert.length > 0) {
-      await this.ctx.database.upsert('cave_hash', hashesToInsert);
-    } else {
-      this.logger.info('无需补全哈希');
+    const caveIds = allCaves.map(c => c.id);
+    const similarPairs = new Set<string>();
+
+    for (let i = 0; i < caveIds.length; i++) {
+      for (let j = i + 1; j < caveIds.length; j++) {
+        const id1 = caveIds[i];
+        const id2 = caveIds[j];
+
+        const textHash1 = caveTextHashes.get(id1);
+        const textHash2 = caveTextHashes.get(id2);
+        if (textHash1 && textHash2) {
+          const textSim = this.calculateSimilarity(textHash1, textHash2);
+          if (textSim >= this.config.textThreshold) {
+            similarPairs.add(`文本:（${id1}，${id2}），相似度：${(textSim * 100).toFixed(2)}%`);
+          }
+        }
+
+        const imageHashes1 = caveImagePHashes.get(id1) || [];
+        const imageHashes2 = caveImagePHashes.get(id2) || [];
+        if (imageHashes1.length > 0 && imageHashes2.length > 0) {
+          for (const imgHash1 of imageHashes1) {
+            for (const imgHash2 of imageHashes2) {
+              const imgSim = this.calculateSimilarity(imgHash1, imgHash2);
+              if (imgSim >= this.config.imageThreshold) {
+                similarPairs.add(`图片:（${id1}，${id2}），相似度：${(imgSim * 100).toFixed(2)}%`);
+              }
+            }
+          }
+        }
+      }
     }
 
-    return `校验完成，共补全 ${historicalCount} 个回声洞的 ${hashesToInsert.length} 条哈希`;
+    const similarityReport = similarPairs.size > 0
+      ? `发现 ${similarPairs.size} 对高相似度内容:\n` + [...similarPairs].join('\n')
+      : '未发现高相似度内容';
+
+    return `校验完成:\n${generationReport}${similarityReport}`;
   }
 
   /**
    * @description 将图片切割为4个象限并为每个象限生成pHash。
    * @param imageBuffer - 图片的 Buffer 数据。
-   * @returns {Promise<Set<string>>} 返回一个包含最多4个唯一哈希值的集合。
+   * @returns {Promise<Set<string>>} 一个包含最多4个唯一哈希值的集合。
    */
   public async generateImageSubHashes(imageBuffer: Buffer): Promise<Set<string>> {
     const hashes = new Set<string>();
     try {
-        const metadata = await sharp(imageBuffer).metadata();
-        const { width, height } = metadata;
+      const metadata = await sharp(imageBuffer).metadata();
+      const { width, height } = metadata;
+      if (!width || !height || width < 16 || height < 16) return hashes;
 
-        if (!width || !height || width < 16 || height < 16) {
-            return hashes;
-        }
+      const regions = [
+        { left: 0, top: 0, width: Math.floor(width / 2), height: Math.floor(height / 2) },
+        { left: Math.floor(width / 2), top: 0, width: Math.ceil(width / 2), height: Math.floor(height / 2) },
+        { left: 0, top: Math.floor(height / 2), width: Math.floor(width / 2), height: Math.ceil(height / 2) },
+        { left: Math.floor(width / 2), top: Math.floor(height / 2), width: Math.ceil(width / 2), height: Math.ceil(height / 2) },
+      ];
 
-        const regions = [
-            { left: 0, top: 0, width: Math.floor(width / 2), height: Math.floor(height / 2) }, // Top-left
-            { left: Math.floor(width / 2), top: 0, width: Math.ceil(width / 2), height: Math.floor(height / 2) }, // Top-right
-            { left: 0, top: Math.floor(height / 2), width: Math.floor(width / 2), height: Math.ceil(height / 2) }, // Bottom-left
-            { left: Math.floor(width / 2), top: Math.floor(height / 2), width: Math.ceil(width / 2), height: Math.ceil(height / 2) }, // Bottom-right
-        ];
-
-        for (const region of regions) {
-            if (region.width < 8 || region.height < 8) continue;
-            const quadrantBuffer = await sharp(imageBuffer).extract(region).toBuffer();
-            const subHash = await this.generateImagePHash(quadrantBuffer);
-            hashes.add(subHash);
-        }
+      for (const region of regions) {
+        if (region.width < 8 || region.height < 8) continue;
+        const quadrantBuffer = await sharp(imageBuffer).extract(region).toBuffer();
+        hashes.add(await this.generateImagePHash(quadrantBuffer));
+      }
     } catch (e) {
-        this.logger.warn(`生成子哈希失败:`, e);
+      this.logger.warn(`生成子哈希失败:`, e);
     }
     return hashes;
   }
 
   /**
-   * @description 根据pHash（感知哈希）算法为图片生成哈希值。
-   * @param imageBuffer - 图片的 Buffer 数据。
-   * @returns {Promise<string>} 返回一个64位的二进制哈希字符串。
+   * @description 根据感知哈希（pHash）算法为图片生成哈希。
+   * @param imageBuffer 图片的 Buffer 数据。
+   * @returns 64位二进制哈希字符串。
    */
   public async generateImagePHash(imageBuffer: Buffer): Promise<string> {
-    const smallImage = await sharp(imageBuffer)
-      .grayscale()
-      .resize(8, 8, { fit: 'fill' })
-      .raw()
-      .toBuffer();
-
-    let totalLuminance = 0;
-    for (let i = 0; i < 64; i++) {
-      totalLuminance += smallImage[i];
-    }
+    const smallImage = await sharp(imageBuffer).grayscale().resize(8, 8, { fit: 'fill' }).raw().toBuffer();
+    const totalLuminance = smallImage.reduce((acc, val) => acc + val, 0);
     const avgLuminance = totalLuminance / 64;
-
-    let hash = '';
-    for (let i = 0; i < 64; i++) {
-      hash += smallImage[i] > avgLuminance ? '1' : '0';
-    }
-    return hash;
+    return Array.from(smallImage).map(lum => lum > avgLuminance ? '1' : '0').join('');
   }
 
   /**
@@ -168,65 +209,43 @@ export class HashManager {
    */
   public calculateHammingDistance(hash1: string, hash2: string): number {
     let distance = 0;
-    for (let i = 0; i < Math.min(hash1.length, hash2.length); i++) {
-      if (hash1[i] !== hash2[i]) {
-        distance++;
-      }
+    const len = Math.min(hash1.length, hash2.length);
+    for (let i = 0; i < len; i++) {
+      if (hash1[i] !== hash2[i]) distance++;
     }
     return distance;
   }
 
   /**
-   * @description 根据汉明距离计算图片pHash的相似度。
+   * @description 根据汉明距离计算图片或文本哈希的相似度。
    * @param hash1 - 第一个哈希字符串。
    * @param hash2 - 第二个哈希字符串。
    * @returns {number} 范围在0到1之间的相似度得分。
    */
-  public calculateImageSimilarity(hash1: string, hash2: string): number {
+  public calculateSimilarity(hash1: string, hash2: string): number {
     const distance = this.calculateHammingDistance(hash1, hash2);
-    // 假设哈希长度为64位
-    const hashLength = 64;
-    return 1 - (distance / hashLength);
+    const hashLength = Math.max(hash1.length, hash2.length);
+    return hashLength === 0 ? 1 : 1 - (distance / hashLength);
   }
 
   /**
-   * @description 将文本分割成指定大小的“瓦片”(shingles)，用于Jaccard相似度计算。
-   * @param text - 输入的文本。
-   * @param size - 每个瓦片的大小，默认为2。
-   * @returns {Set<string>} 包含所有唯一瓦片的集合。
-   */
-  private getShingles(text: string, size = 2): Set<string> {
-    const shingles = new Set<string>();
-    const cleanedText = text.replace(/\s+/g, '');
-    for (let i = 0; i <= cleanedText.length - size; i++) {
-      shingles.add(cleanedText.substring(i, i + size));
-    }
-    return shingles;
-  }
-
-  /**
-   * @description 为文本生成基于Shingling的哈希字符串。
+   * @description 为文本生成基于 Simhash 算法的哈希字符串。
    * @param text - 需要处理的文本。
-   * @returns {string} 由排序后的shingles组成的、用'|'分隔的哈希字符串。
+   * @returns {string} 64位二进制 Simhash 字符串。
    */
-  public generateTextHash(text: string): string {
-    if (!text) return '';
-    const shingles = Array.from(this.getShingles(text));
-    return shingles.sort().join('|');
-  }
+  public generateTextSimhash(text: string): string {
+    if (!text?.trim()) return '';
+    const tokens = text.toLowerCase().split(/[^a-z0-9\u4e00-\u9fa5]+/).filter(Boolean);
+    if (tokens.length === 0) return '';
 
-  /**
-   * @description 使用Jaccard相似度系数计算两个文本哈希的相似度。
-   * @param hash1 - 第一个文本哈希。
-   * @param hash2 - 第二个文本哈希。
-   * @returns {number} 范围在0到1之间的相似度得分。
-   */
-  public calculateTextSimilarity(hash1: string, hash2: string): number {
-    if (!hash1 || !hash2) return 0;
-    const set1 = new Set(hash1.split('|'));
-    const set2 = new Set(hash2.split('|'));
-    const intersection = new Set([...set1].filter(x => set2.has(x)));
-    const union = new Set([...set1, ...set2]);
-    return union.size === 0 ? 1 : intersection.size / union.size;
+    const vector = new Array(HashManager.SIMHASH_BITS).fill(0);
+    tokens.forEach(token => {
+      const hash = crypto.createHash('md5').update(token).digest();
+      for (let i = 0; i < HashManager.SIMHASH_BITS; i++) {
+        vector[i] += (hash[Math.floor(i / 8)] >> (i % 8)) & 1 ? 1 : -1;
+      }
+    });
+
+    return vector.map(v => v > 0 ? '1' : '0').join('');
   }
 }
