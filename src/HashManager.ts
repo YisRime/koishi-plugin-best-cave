@@ -70,8 +70,12 @@ export class HashManager {
     const flushHashes = async () => {
       if (hashesToInsert.length > 0) {
         this.logger.info(`补全第 ${batchStartCaveCount + 1} 到 ${historicalCount} 条回声洞哈希中...`);
-        await this.ctx.database.upsert('cave_hash', hashesToInsert);
-        totalHashesGenerated += hashesToInsert.length;
+        try {
+          await this.ctx.database.upsert('cave_hash', hashesToInsert);
+          totalHashesGenerated += hashesToInsert.length;
+        } catch (error) {
+          this.logger.error(`导入哈希失败: ${error.message}`);
+        }
         hashesToInsert = [];
         batchStartCaveCount = historicalCount;
       }
@@ -82,22 +86,32 @@ export class HashManager {
 
       historicalCount++;
 
+      const newHashesForCave: CaveHashObject[] = [];
+
       const combinedText = cave.elements.filter(el => el.type === 'text' && el.content).map(el => el.content).join(' ');
-      if (combinedText) {
-        hashesToInsert.push({ cave: cave.id, hash: this.generateTextSimhash(combinedText), type: 'sim' });
+      const textHash = this.generateTextSimhash(combinedText);
+      if (textHash) {
+        newHashesForCave.push({ cave: cave.id, hash: textHash, type: 'sim' });
       }
 
       for (const el of cave.elements.filter(el => el.type === 'image' && el.file)) {
         try {
           const imageBuffer = await this.fileManager.readFile(el.file);
           const pHash = await this.generateImagePHash(imageBuffer);
-          hashesToInsert.push({ cave: cave.id, hash: pHash, type: 'phash' });
+          newHashesForCave.push({ cave: cave.id, hash: pHash, type: 'phash' });
           const subHashes = await this.generateImageSubHashes(imageBuffer);
-          subHashes.forEach(subHash => hashesToInsert.push({ cave: cave.id, hash: subHash, type: 'sub' }));
+          subHashes.forEach(subHash => newHashesForCave.push({ cave: cave.id, hash: subHash, type: 'sub' }));
         } catch (e) {
           this.logger.warn(`无法为回声洞（${cave.id}）的内容（${el.file}）生成哈希:`, e);
         }
       }
+
+      const uniqueHashesMap = new Map<string, CaveHashObject>();
+      newHashesForCave.forEach(h => {
+        const uniqueKey = `${h.type}-${h.hash}`;
+        uniqueHashesMap.set(uniqueKey, h);
+      });
+      hashesToInsert.push(...uniqueHashesMap.values());
 
       if (hashesToInsert.length >= 100) await flushHashes();
     }
