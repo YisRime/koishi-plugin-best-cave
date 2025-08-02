@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-best-cave",
-  "description": "最强大的回声洞现已重构完成啦！注意数据格式需要使用脚本转换哦~",
+  "description": "功能强大、高度可定制的回声洞。支持丰富的媒体类型、内容查重、人工审核、用户昵称、数据迁移以及本地/S3 双重文件存储后端。",
   "version": "2.1.4",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
