@@ -1,7 +1,6 @@
 import { Context, Logger } from 'koishi';
 import { FileManager } from './FileManager';
 import { CaveObject, Config } from './index';
-import { getNextCaveId } from './Utils';
 
 /**
  * @description 用于数据导入/导出的可移植回声洞对象格式，排除了数据库自增的 `id`。
@@ -19,12 +18,14 @@ export class DataManager {
    * @param config 插件配置。
    * @param fileManager 文件管理器实例。
    * @param logger 日志记录器实例。
+   * @param reusableIds 可复用 ID 的内存缓存。
    */
   constructor(
     private ctx: Context,
     private config: Config,
     private fileManager: FileManager,
     private logger: Logger,
+    private reusableIds: Set<number>,
   ) {}
 
   /**
@@ -40,7 +41,7 @@ export class DataManager {
         return await action();
       } catch (error) {
         this.logger.error('数据操作时发生错误:', error);
-        return `操作失败: ${error.message || '未知错误'}`;
+        return `操作失败: ${error.message}`;
       }
     };
 
@@ -77,21 +78,30 @@ export class DataManager {
     try {
       const fileContent = await this.fileManager.readFile(fileName);
       importedCaves = JSON.parse(fileContent.toString('utf-8'));
-      if (!Array.isArray(importedCaves)) throw new Error('导入文件格式无效');
+      if (!Array.isArray(importedCaves)) throw new Error('文件格式无效');
+      if (!importedCaves.length) throw new Error('导入文件为空');
     } catch (error) {
       this.logger.error(`读取导入文件失败:`, error);
-      throw new Error(`读取导入文件失败: ${error.message || '未知错误'}`);
+      throw new Error(`读取导入文件失败: ${error.message}`);
     }
 
-    let successCount = 0;
-    for (const cave of importedCaves) {
-      // 逐条获取ID，在导入大量数据时可能有效率问题，但能确保ID的唯一性和连续性。
-      const newId = await getNextCaveId(this.ctx, {});
-      const newCave: CaveObject = { ...cave, id: newId, status: 'active' };
-      await this.ctx.database.create('cave', newCave);
-      successCount++;
-    }
+    const [lastCave] = await this.ctx.database.get('cave', {}, {
+      sort: { id: 'desc' },
+      limit: 1,
+      fields: ['id'],
+    });
+    let startId = (lastCave?.id || 0) + 1;
 
-    return `成功导入 ${successCount} 条回声洞数据`;
+    const newCavesToInsert: CaveObject[] = importedCaves.map((cave, index) => ({
+      ...cave,
+      id: startId + index,
+      status: 'active',
+    }));
+
+    await this.ctx.database.upsert('cave', newCavesToInsert);
+
+    this.reusableIds.clear();
+
+    return `成功导入 ${newCavesToInsert.length} 条数据`;
   }
 }

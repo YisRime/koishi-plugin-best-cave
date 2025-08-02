@@ -114,9 +114,10 @@ export function apply(ctx: Context, config: Config) {
   // --- 初始化管理器 ---
   const fileManager = new FileManager(ctx.baseDir, config, logger);
   const lastUsed = new Map<string, number>();
+  const reusableIds = new Set<number>();
   const profileManager = config.enableProfile ? new ProfileManager(ctx) : null;
-  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger) : null;
-  const reviewManager = config.enableReview ? new ReviewManager(ctx, config, fileManager, logger) : null;
+  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger, reusableIds) : null;
+  const reviewManager = config.enableReview ? new ReviewManager(ctx, config, fileManager, logger, reusableIds) : null;
 
   // --- 指令定义 ---
   const cave = ctx.command('cave', '回声洞')
@@ -171,13 +172,15 @@ export function apply(ctx: Context, config: Config) {
         }
 
         const idScopeQuery = config.perChannel && session.channelId ? { channelId: session.channelId } : {};
-        const newId = await utils.getNextCaveId(ctx, idScopeQuery);
+        const newId = await utils.getNextCaveId(ctx, idScopeQuery, reusableIds);
 
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(
           sourceElements, newId, session.channelId, session.userId
         );
 
-        if (finalElementsForDb.length === 0) return "内容为空，已取消添加";
+        if (finalElementsForDb.length === 0) {
+          return "内容为空，已取消添加";
+        }
 
         const userName = (config.enableProfile ? await profileManager.getNickname(session.userId) : null) || session.username;
         const hasMedia = mediaToSave.length > 0;
@@ -192,19 +195,20 @@ export function apply(ctx: Context, config: Config) {
           status: initialStatus,
           time: new Date(),
         };
-
         await ctx.database.create('cave', newCave);
 
         if (hasMedia) {
-          // 异步处理文件上传
-          utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave);
+          utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave, reusableIds);
         } else if (initialStatus === 'pending') {
           reviewManager.sendForReview(newCave);
         }
 
-        return (initialStatus === 'pending' || initialStatus === 'preload' && config.enableReview)
+        const responseMessage = (initialStatus === 'pending' || (initialStatus === 'preload' && config.enableReview))
           ? `提交成功，序号为（${newId}）`
           : `添加成功，序号为（${newId}）`;
+
+        return responseMessage;
+
       } catch (error) {
         logger.error('添加回声洞失败:', error);
         return '添加失败，请稍后再试';
@@ -247,7 +251,7 @@ export function apply(ctx: Context, config: Config) {
 
         await ctx.database.upsert('cave', [{ id: id, status: 'delete' }]);
         const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
-        utils.cleanupPendingDeletions(ctx, fileManager, logger); // 异步清理
+        utils.cleanupPendingDeletions(ctx, fileManager, logger, reusableIds); // 异步清理
         return [`已删除`, ...caveMessage];
       } catch (error) {
         logger.error(`标记回声洞（${id}）失败:`, error);

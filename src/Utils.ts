@@ -6,6 +6,11 @@ import { FileManager } from './FileManager';
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
 
 /**
+ * @description 一个特殊的标志，当它存在于可复用ID缓存中时，表示数据库ID连续，下次可直接取最大ID+1。
+ */
+const MAX_ID_FLAG = 0;
+
+/**
  * @description 将数据库存储的 StoredElement[] 转换为 Koishi 的 h() 元素数组。
  * @param elements 从数据库读取的元素数组。
  * @returns 转换后的 h() 元素数组。
@@ -70,8 +75,9 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
  * @param ctx Koishi 上下文。
  * @param fileManager FileManager 实例。
  * @param logger Logger 实例。
+ * @param reusableIds 可复用 ID 的内存缓存。
  */
-export async function cleanupPendingDeletions(ctx: Context, fileManager: FileManager, logger: Logger): Promise<void> {
+export async function cleanupPendingDeletions(ctx: Context, fileManager: FileManager, logger: Logger, reusableIds: Set<number>): Promise<void> {
   try {
     const cavesToDelete = await ctx.database.get('cave', { status: 'delete' });
     if (!cavesToDelete.length) return;
@@ -81,6 +87,8 @@ export async function cleanupPendingDeletions(ctx: Context, fileManager: FileMan
         .filter(el => el.file)
         .map(el => fileManager.deleteFile(el.file));
       await Promise.all(deletePromises);
+      reusableIds.add(cave.id);
+      reusableIds.delete(MAX_ID_FLAG);
       await ctx.database.remove('cave', { id: cave.id });
     }
   } catch (error) {
@@ -100,19 +108,53 @@ export function getScopeQuery(session: Session, config: Config): object {
 }
 
 /**
- * @description 获取下一个可用的回声洞 ID（最小的未使用正整数）。
+ * @description 获取下一个可用的回声洞 ID。
+ * 实现了三阶段逻辑：优先使用回收ID -> 扫描空闲ID -> 获取最大ID+1。
  * @param ctx Koishi 上下文。
  * @param query 查询范围条件，用于分群模式。
+ * @param reusableIds 可复用 ID 的内存缓存。
  * @returns 可用的新 ID。
- * @performance 在大数据集下，此函数可能存在性能瓶颈，因为它需要获取所有现有ID。
  */
-export async function getNextCaveId(ctx: Context, query: object = {}): Promise<number> {
+export async function getNextCaveId(ctx: Context, query: object = {}, reusableIds: Set<number>): Promise<number> {
+  // 优先使用缓存中已回收的 ID (ID > 0)
+  for (const id of reusableIds) {
+    if (id > MAX_ID_FLAG) {
+      reusableIds.delete(id);
+      return id;
+    }
+  }
+
+  // 如果缓存中有特殊标志，说明之前已确认ID连续，直接取最大ID+1
+  if (reusableIds.has(MAX_ID_FLAG)) {
+    reusableIds.delete(MAX_ID_FLAG); // 使用后即移除标志
+    const [lastCave] = await ctx.database.get('cave', query, {
+      fields: ['id'],
+      sort: { id: 'desc' },
+      limit: 1,
+    });
+    const newId = (lastCave?.id || 0) + 1;
+    // 为下一次调用重新设置标志，因为我们确信现在仍然是连续的
+    reusableIds.add(MAX_ID_FLAG);
+    return newId;
+  }
+
+  // 缓存为空（通常在重启后）或只包含无效ID，进行一次全量扫描
   const allCaveIds = (await ctx.database.get('cave', query, { fields: ['id'] })).map(c => c.id);
   const existingIds = new Set(allCaveIds);
+
+  // 寻找最小的未被使用的正整数ID
   let newId = 1;
   while (existingIds.has(newId)) {
     newId++;
   }
+
+  // 检查ID是否连续。如果连续（数据库中的记录数等于最大ID值），则设置特殊标志，
+  // 以便下次调用时可以跳过扫描。
+  const maxIdInDb = allCaveIds.length > 0 ? Math.max(...allCaveIds) : 0;
+  if (existingIds.size === maxIdInDb) {
+    reusableIds.add(MAX_ID_FLAG);
+  }
+
   return newId;
 }
 
@@ -194,8 +236,9 @@ export async function processMessageElements(sourceElements: h[], newId: number,
  * @param reviewManager - 审核管理器实例 (可能为 null)。
  * @param cave - 已创建的、状态为 'preload' 的回声洞对象。
  * @param mediaToSave - 需要下载和保存的媒体文件列表。
+ * @param reusableIds 可复用 ID 的内存缓存。
  */
-export async function handleFileUploads(ctx: Context, config: Config, fileManager: FileManager, logger: Logger, reviewManager: any, cave: CaveObject, mediaToSave: { sourceUrl: string, fileName: string }[]) {
+export async function handleFileUploads(ctx: Context, config: Config, fileManager: FileManager, logger: Logger, reviewManager: any, cave: CaveObject, mediaToSave: { sourceUrl: string, fileName: string }[], reusableIds: Set<number>) {
   try {
     const uploadPromises = mediaToSave.map(async (media) => {
       const response = await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 });
@@ -214,6 +257,6 @@ export async function handleFileUploads(ctx: Context, config: Config, fileManage
     logger.error(`回声洞（${cave.id}）文件保存失败:`, fileSaveError);
     await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
     // 异步清理，不阻塞主流程
-    cleanupPendingDeletions(ctx, fileManager, logger);
+    cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
   }
 }

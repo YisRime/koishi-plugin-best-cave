@@ -14,49 +14,85 @@ export class ReviewManager {
    * @param config 插件配置。
    * @param fileManager 文件管理器实例。
    * @param logger 日志记录器实例。
+   * @param reusableIds 可复用 ID 的内存缓存。
    */
   constructor(
     private ctx: Context,
     private config: Config,
     private fileManager: FileManager,
     private logger: Logger,
+    private reusableIds: Set<number>,
   ) {}
 
   /**
-   * @description 注册与审核相关的 `.review` 子命令。
+   * @description 注册与审核相关的子命令。
    * @param cave - 主 `cave` 命令实例。
    */
   public registerCommands(cave) {
-    cave.subcommand('.review [id:posint] [action:string]', '审核回声洞')
-      .usage('查看或审核回声洞，使用 <Y/N> 进行审核。')
-      .action(async ({ session }, id, action) => {
-        const adminChannelId = this.config.adminChannel?.split(':')[1];
-        if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
+    // 统一的管理员权限检查
+    const requireAdmin = (session) => {
+      const adminChannelId = this.config.adminChannel?.split(':')[1];
+      if (session.channelId !== adminChannelId) {
+        return '此指令仅限在管理群组中使用';
+      }
+      return null;
+    };
+
+    const review = cave.subcommand('.review [id:posint]', '审核回声洞')
+      .usage('查看所有待审核回声洞，或查看指定待审核回声洞。')
+      .action(async ({ session }, id) => {
+        const adminError = requireAdmin(session);
+        if (adminError) return adminError;
 
         if (!id) {
           const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' }, { fields: ['id'] });
           if (!pendingCaves.length) return '当前没有需要审核的回声洞';
-          return `当前共有 ${pendingCaves.length} 条待审核回声洞，序号为：\n${pendingCaves.map(c => c.id).join(', ')}`;
+          return `当前共有 ${pendingCaves.length} 条待审核回声洞，序号为：\n${pendingCaves.map(c => c.id).join('|')}`;
         }
 
         const [targetCave] = await this.ctx.database.get('cave', { id });
         if (!targetCave) return `回声洞（${id}）不存在`;
         if (targetCave.status !== 'pending') return `回声洞（${id}）无需审核`;
 
-        if (!action) {
-          return [`待审核：`, ...await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger)];
-        }
-
-        const normalizedAction = action.toLowerCase();
-        if (['y', 'yes', 'pass', 'approve'].includes(normalizedAction)) {
-          return this.processReview('approve', id);
-        }
-        if (['n', 'no', 'deny', 'reject'].includes(normalizedAction)) {
-          return this.processReview('reject', id);
-        }
-
-        return `无效操作: "${action}"\n请使用 "Y" (通过) 或 "N" (拒绝)`;
+        return [`待审核：`, ...await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger)];
       });
+
+    const createReviewAction = (actionType: 'approve' | 'reject') => async ({ session }, id: number) => {
+      const adminError = requireAdmin(session);
+      if (adminError) return adminError;
+
+      await session.send('正在处理，请稍候...');
+
+      try {
+        if (!id) {
+          const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' });
+          if (!pendingCaves.length) return `当前没有需要${actionType === 'approve' ? '通过' : '拒绝'}的回声洞`;
+
+          if (actionType === 'approve') {
+            await this.ctx.database.upsert('cave', pendingCaves.map(c => ({ id: c.id, status: 'active' })));
+            return `已通过 ${pendingCaves.length} 条回声洞`;
+          } else {
+            await this.ctx.database.upsert('cave', pendingCaves.map(c => ({ id: c.id, status: 'delete' })));
+            cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
+            return `已拒绝 ${pendingCaves.length} 条回声洞`;
+          }
+        }
+
+        return this.processReview(actionType, id);
+
+      } catch (error) {
+        this.logger.error(`审核操作失败:`, error);
+        return `操作失败: ${error.message}`;
+      }
+    };
+
+    review.subcommand('.Y [id:posint]', '通过审核')
+      .usage('通过回声洞审核，可批量操作。')
+      .action(createReviewAction('approve'));
+
+    review.subcommand('.N [id:posint]', '拒绝审核')
+      .usage('拒绝回声洞审核，可批量操作。')
+      .action(createReviewAction('reject'));
   }
 
   /**
@@ -94,7 +130,7 @@ export class ReviewManager {
     } else {
       await this.ctx.database.upsert('cave', [{ id: caveId, status: 'delete' }]);
       // 异步触发清理，不阻塞当前响应
-      cleanupPendingDeletions(this.ctx, this.fileManager, this.logger);
+      cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
       return `回声洞（${caveId}）已拒绝`;
     }
   }
