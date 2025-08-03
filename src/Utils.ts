@@ -223,37 +223,47 @@ export async function processMessageElements(sourceElements: h[], newId: number,
  */
 export async function handleFileUploads(
   ctx: Context, config: Config, fileManager: FileManager, logger: Logger,
-  reviewManager: ReviewManager, cave: CaveObject, mediaToSave: { sourceUrl: string, fileName: string }[],
+  reviewManager: ReviewManager, cave: CaveObject, mediaToToSave: { sourceUrl: string, fileName: string }[],
   reusableIds: Set<number>, session: Session, hashManager: HashManager, textHashesToStore: Omit<CaveHashObject, 'cave'>[]
 ) {
   try {
     const downloadedMedia: { fileName: string, buffer: Buffer }[] = [];
     const imageHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
 
-    for (const media of mediaToSave) {
+    const existingPHashes = hashManager ? await ctx.database.get('cave_hash', { type: 'phash' }) : [];
+    const existingSubHashes = hashManager ? await ctx.database.get('cave_hash', { type: 'sub' }) : [];
+
+    for (const media of mediaToToSave) {
       const buffer = Buffer.from(await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 }));
       downloadedMedia.push({ fileName: media.fileName, buffer });
 
       if (hashManager && ['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(media.fileName).toLowerCase())) {
         const pHash = await hashManager.generateImagePHash(buffer);
-        const subHashes = await hashManager.generateImageSubHashes(buffer);
-        const allNewImageHashes = [pHash, ...subHashes];
+        for (const existing of existingPHashes) {
+          const similarity = hashManager.calculateSimilarity(pHash, existing.hash);
+          if (similarity >= config.imageThreshold) {
+            await session.send(`图片与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`);
+            await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
+            reusableIds.add(cave.id);
+            return;
+          }
+        }
 
-        const existingImageHashes = await ctx.database.get('cave_hash', { type: /^image_/ });
-        for (const newHash of allNewImageHashes) {
-          for (const existing of existingImageHashes) {
-            const similarity = hashManager.calculateSimilarity(newHash, existing.hash);
+        const pHashEntry: Omit<CaveHashObject, 'cave'> = { hash: pHash, type: 'phash' };
+        imageHashesToStore.push(pHashEntry);
+
+        const subHashes = await hashManager.generateImageSubHashes(buffer);
+        for (const newSubHash of subHashes) {
+          for (const existing of existingSubHashes) {
+            const similarity = hashManager.calculateSimilarity(newSubHash, existing.hash);
             if (similarity >= config.imageThreshold) {
-              await session.send(`图片与回声洞（${existing.cave}）的相似度（${(similarity * 100).toFixed(2)}%）过高`);
-              await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
-              reusableIds.add(cave.id);
-              return;
+              await session.send(`图片局部与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%`);
             }
           }
         }
-        const pHashEntry: Omit<CaveHashObject, 'cave'> = { hash: pHash, type: 'phash' };
+
         const subHashEntries: Omit<CaveHashObject, 'cave'>[] = [...subHashes].map(sh => ({ hash: sh, type: 'sub' }));
-        imageHashesToStore.push(pHashEntry, ...subHashEntries);
+        imageHashesToStore.push(...subHashEntries);
       }
     }
 

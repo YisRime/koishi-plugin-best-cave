@@ -144,50 +144,66 @@ export class HashManager {
   }
 
   /**
-   * @description 对所有已存在哈希的回声洞进行相似度检查。
+   * @description 对回声洞进行混合策略的相似度与重复内容检查。
    * @returns {Promise<string>} 一个包含操作结果的报告字符串。
    */
   public async checkForSimilarCaves(): Promise<string> {
     const allHashes = await this.ctx.database.get('cave_hash', {});
+
     const caveTextHashes = new Map<number, string>();
     const caveImagePHashes = new Map<number, string[]>();
+    const subHashToCaves = new Map<string, Set<number>>();
 
     for (const hash of allHashes) {
-      if (hash.type === 'sim') {
-        caveTextHashes.set(hash.cave, hash.hash);
-      } else if (hash.type === 'phash') {
-        if (!caveImagePHashes.has(hash.cave)) caveImagePHashes.set(hash.cave, []);
-        caveImagePHashes.get(hash.cave)!.push(hash.hash);
+      switch (hash.type) {
+        case 'sim':
+          caveTextHashes.set(hash.cave, hash.hash);
+          break;
+        case 'phash':
+          if (!caveImagePHashes.has(hash.cave)) caveImagePHashes.set(hash.cave, []);
+          caveImagePHashes.get(hash.cave)!.push(hash.hash);
+          break;
+        case 'sub':
+          if (!subHashToCaves.has(hash.hash)) subHashToCaves.set(hash.hash, new Set());
+          subHashToCaves.get(hash.hash)!.add(hash.cave);
+          break;
       }
     }
 
-    const caveIds = Array.from(new Set([...caveTextHashes.keys(), ...caveImagePHashes.keys()]));
-    const similarPairs = new Set<string>();
+    const subHashDuplicates: string[] = [];
+    subHashToCaves.forEach((caves, hash) => {
+      if (caves.size > 1) {
+        const sortedCaves = [...caves].sort((a, b) => a - b).join(', ');
+        subHashDuplicates.push(`[${sortedCaves}]`);
+      }
+    });
 
-    for (let i = 0; i < caveIds.length; i++) {
-      for (let j = i + 1; j < caveIds.length; j++) {
-        const id1 = caveIds[i];
-        const id2 = caveIds[j];
+    const textSimilarPairs: string[] = [];
+    const imageSimilarPairs: string[] = [];
+    const allCaveIds = Array.from(new Set([...caveTextHashes.keys(), ...caveImagePHashes.keys()]));
 
-        // 比较文本相似度
+    for (let i = 0; i < allCaveIds.length; i++) {
+      for (let j = i + 1; j < allCaveIds.length; j++) {
+        const id1 = allCaveIds[i];
+        const id2 = allCaveIds[j];
+
         const textHash1 = caveTextHashes.get(id1);
         const textHash2 = caveTextHashes.get(id2);
         if (textHash1 && textHash2) {
           const textSim = this.calculateSimilarity(textHash1, textHash2);
           if (textSim >= this.config.textThreshold) {
-            similarPairs.add(`文本${id1}&${id2}=${(textSim * 100).toFixed(2)}%`);
+            textSimilarPairs.push(`${id1} & ${id2} = ${(textSim * 100).toFixed(2)}%`);
           }
         }
 
-        // 比较图片相似度
-        const imageHashes1 = caveImagePHashes.get(id1) || [];
-        const imageHashes2 = caveImagePHashes.get(id2) || [];
-        if (imageHashes1.length > 0 && imageHashes2.length > 0) {
-          for (const imgHash1 of imageHashes1) {
-            for (const imgHash2 of imageHashes2) {
+        const pHashes1 = caveImagePHashes.get(id1) || [];
+        const pHashes2 = caveImagePHashes.get(id2) || [];
+        if (pHashes1.length > 0 && pHashes2.length > 0) {
+          for (const imgHash1 of pHashes1) {
+            for (const imgHash2 of pHashes2) {
               const imgSim = this.calculateSimilarity(imgHash1, imgHash2);
               if (imgSim >= this.config.imageThreshold) {
-                similarPairs.add(`图片${id1}&${id2}=${(imgSim * 100).toFixed(2)}%`);
+                imageSimilarPairs.push(`${id1} & ${id2} = ${(imgSim * 100).toFixed(2)}%`);
               }
             }
           }
@@ -195,9 +211,27 @@ export class HashManager {
       }
     }
 
-    return similarPairs.size > 0
-      ? `已发现 ${similarPairs.size} 对高相似度内容:\n` + [...similarPairs].join('\n')
-      : '未发现高相似度内容';
+    // --- 3. 构建最终报告 ---
+    const totalFindings = textSimilarPairs.length + imageSimilarPairs.length + subHashDuplicates.length;
+    if (totalFindings === 0) {
+      return '未发现高相似度的内容';
+    }
+
+    let report = `已发现 ${totalFindings} 组高相似度的内容:\n`;
+
+    if (textSimilarPairs.length > 0) {
+      report += '文本相似度过高:\n' + [...new Set(textSimilarPairs)].join('\n');
+    }
+
+    if (imageSimilarPairs.length > 0) {
+      report += '图片相似度过高:\n' + [...new Set(imageSimilarPairs)].join('\n');
+    }
+
+    if (subHashDuplicates.length > 0) {
+      report += '子图完全重复:\n' + subHashDuplicates.join('\n');
+    }
+
+    return report.trim();
   }
 
   /**

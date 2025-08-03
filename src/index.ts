@@ -192,7 +192,7 @@ export function apply(ctx: Context, config: Config) {
             for (const existing of existingTextHashes) {
               const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
               if (similarity >= config.textThreshold) {
-                return `内容与回声洞（${existing.cave}）的相似度（${(similarity * 100).toFixed(2)}%）过高`;
+                return `文本与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`;
               }
             }
             textHashesToStore.push({ hash: newSimhash, type: 'sim' });
@@ -275,7 +275,7 @@ export function apply(ctx: Context, config: Config) {
       try {
         const userCaves = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), userId: session.userId });
         if (!userCaves.length) return '你还没有投稿过回声洞';
-        const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join(', ');
+        const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join('|');
         return `你已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;
       } catch (error) {
         logger.error('查询投稿列表失败:', error);
