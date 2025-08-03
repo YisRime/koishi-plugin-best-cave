@@ -147,7 +147,7 @@ export class HashManager {
 
     await flushBatch();
 
-    return `已补全 ${totalToProcessCount} 个回声洞的 ${totalHashesGenerated} 条哈希（失败${errorCount} 条）`;
+    return `已补全 ${totalToProcessCount} 个回声洞的 ${totalHashesGenerated} 条哈希（失败 ${errorCount} 条）`;
   }
 
   /**
@@ -213,15 +213,15 @@ export class HashManager {
         phash_color: new Map(),
         dhash_gray: new Map(),
     };
-    const subHashToCaves = new Map<string, Set<number>>();
+    const subHashGroups = new Map<number, string[]>();
 
     for (const hash of allHashes) {
         if (hashGroups[hash.type]) {
             if (!hashGroups[hash.type].has(hash.cave)) hashGroups[hash.type].set(hash.cave, []);
             hashGroups[hash.type].get(hash.cave)!.push(hash.hash);
         } else if (hash.type.startsWith('sub_phash_')) {
-            if (!subHashToCaves.has(hash.hash)) subHashToCaves.set(hash.hash, new Set());
-            subHashToCaves.get(hash.hash)!.add(hash.cave);
+            if (!subHashGroups.has(hash.cave)) subHashGroups.set(hash.cave, []);
+            subHashGroups.get(hash.cave)!.push(hash.hash);
         }
     }
 
@@ -229,6 +229,7 @@ export class HashManager {
         text: new Set<string>(),
         image_color: new Set<string>(),
         image_dhash: new Set<string>(),
+        image_part: new Set<string>(),
     };
 
     for (let i = 0; i < allCaveIds.length; i++) {
@@ -252,7 +253,7 @@ export class HashManager {
             for (const h1 of colorHashes1) {
                 for (const h2 of colorHashes2) {
                     const sim = this.calculateSimilarity(h1, h2);
-                    if (sim >= this.config.imageThreshold) {
+                    if (sim >= this.config.imageWholeThreshold) {
                         similarPairs.image_color.add(`${id1} & ${id2} = ${(sim * 100).toFixed(2)}%`);
                     }
                 }
@@ -264,30 +265,40 @@ export class HashManager {
             for (const h1 of dHashes1) {
                 for (const h2 of dHashes2) {
                     const sim = this.calculateSimilarity(h1, h2);
-                    if (sim >= this.config.imageThreshold) {
+                    if (sim >= this.config.imageWholeThreshold) {
                         similarPairs.image_dhash.add(`${id1} & ${id2} = ${(sim * 100).toFixed(2)}%`);
                     }
+                }
+            }
+
+            // 图片局部近似度
+            const subHashes1 = subHashGroups.get(id1) || [];
+            const subHashes2 = subHashGroups.get(id2) || [];
+            if (subHashes1.length > 0 && subHashes2.length > 0) {
+                let maxPartSim = 0;
+                for (const h1 of subHashes1) {
+                    for (const h2 of subHashes2) {
+                        const sim = this.calculateSimilarity(h1, h2);
+                        if (sim > maxPartSim) {
+                            maxPartSim = sim;
+                        }
+                    }
+                }
+                if (maxPartSim >= this.config.imagePartThreshold) {
+                    similarPairs.image_part.add(`${id1} & ${id2} = ${(maxPartSim * 100).toFixed(2)}%`);
                 }
             }
         }
     }
 
-    const subHashDuplicates: string[] = [];
-    subHashToCaves.forEach((caves) => {
-      if (caves.size > 1) {
-        const sortedCaves = [...caves].sort((a, b) => a - b).join(', ');
-        subHashDuplicates.push(`[${sortedCaves}]`);
-      }
-    });
-
-    const totalFindings = similarPairs.text.size + similarPairs.image_color.size + similarPairs.image_dhash.size + subHashDuplicates.length;
+    const totalFindings = similarPairs.text.size + similarPairs.image_color.size + similarPairs.image_dhash.size + similarPairs.image_part.size;
     if (totalFindings === 0) return '未发现高相似度的内容';
 
-    let report = `已发现 ${totalFindings} 组高相似度或重复的内容:`;
+    let report = `已发现 ${totalFindings} 组高相似度的内容:`;
     if (similarPairs.text.size > 0) report += '\n文本近似:\n' + [...similarPairs.text].join('\n');
-    if (similarPairs.image_color.size > 0) report += '\n图片整体相似:\n' + [...similarPairs.image_color].join('\n');
+    if (similarPairs.image_color.size > 0) report += '\n图片颜色相似:\n' + [...similarPairs.image_color].join('\n');
     if (similarPairs.image_dhash.size > 0) report += '\n图片结构相似:\n' + [...similarPairs.image_dhash].join('\n');
-    if (subHashDuplicates.length > 0) report += '\n图片局部重复:\n' + [...new Set(subHashDuplicates)].join('\n');
+    if (similarPairs.image_part.size > 0) report += '\n图片局部近似:\n' + [...similarPairs.image_part].join('\n');
 
     return report.trim();
   }

@@ -235,14 +235,14 @@ export async function handleFileUploads(
 
         for (const existing of existingColorPHashes) {
             const similarity = hashManager.calculateSimilarity(colorPHash, existing.hash);
-            if (similarity >= config.imageThreshold) {
+            if (similarity >= config.imageWholeThreshold) {
                 if (!similarityScores.has(existing.cave)) similarityScores.set(existing.cave, {});
                 similarityScores.get(existing.cave)!.colorSim = similarity;
             }
         }
         for (const existing of existingDHashes) {
             const similarity = hashManager.calculateSimilarity(dHash, existing.hash);
-             if (similarity >= config.imageThreshold) {
+             if (similarity >= config.imageWholeThreshold) {
                 if (!similarityScores.has(existing.cave)) similarityScores.set(existing.cave, {});
                 similarityScores.get(existing.cave)!.dSim = similarity;
             }
@@ -269,7 +269,7 @@ export async function handleFileUploads(
                 if (notifiedPartialCaves.has(existing.cave)) continue;
 
                 const similarity = hashManager.calculateSimilarity(newSubHash, existing.hash);
-                if (similarity >= config.imageThreshold) {
+                if (similarity >= config.imagePartThreshold) {
                     await session.send(`图片局部与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%`);
                     notifiedPartialCaves.add(existing.cave);
                 }

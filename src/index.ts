@@ -62,7 +62,8 @@ export interface Config {
   caveFormat: string;
   enableSimilarity: boolean;
   textThreshold: number;
-  imageThreshold: number;
+  imageWholeThreshold: number;
+  imagePartThreshold: number;
   localPath?: string;
   enableS3: boolean;
   endpoint?: string;
@@ -86,7 +87,8 @@ export const Config: Schema<Config> = Schema.intersect([
     enableReview: Schema.boolean().default(false).description("启用审核"),
     enableSimilarity: Schema.boolean().default(false).description("启用查重"),
     textThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('文本相似度阈值'),
-    imageThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('图片相似度阈值'),
+    imageWholeThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('图片整体相似度阈值'),
+    imagePartThreshold: Schema.number().min(0).max(1).step(0.01).default(0.95).description('图片局部相似度阈值'),
   }).description('复核配置'),
   Schema.object({
     localPath: Schema.string().description('文件映射路径'),
