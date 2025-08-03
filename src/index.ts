@@ -184,7 +184,7 @@ export function apply(ctx: Context, config: Config) {
                 for (const existing of existingTextHashes) {
                   const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
                   if (similarity >= config.textThreshold) {
-                    return `文本与回声洞（${existing.cave}）的相似度为 ${similarity.toFixed(2)}%，超过阈值`;
+                    return `文本与回声洞（${existing.cave}）的相似度（${similarity.toFixed(2)}%）超过阈值`;
                   }
                 }
                 textHashesToStore.push({ hash: newSimhash, type: 'simhash' });

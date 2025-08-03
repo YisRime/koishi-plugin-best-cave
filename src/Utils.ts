@@ -227,7 +227,7 @@ export async function handleFileUploads(
         for (const existing of existingGlobalHashes) {
           const similarity = hashManager.calculateSimilarity(globalHash, existing.hash);
           if (similarity >= config.imageWholeThreshold) {
-            await session.send(`图片与回声洞（${existing.cave}）的相似度为 ${similarity.toFixed(2)}%，超过阈值`);
+            await session.send(`图片与回声洞（${existing.cave}）的相似度（${similarity.toFixed(2)}%）超过阈值`);
             await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
             cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
             return;
@@ -238,9 +238,8 @@ export async function handleFileUploads(
         for (const newSubHash of Object.values(quadrantHashes)) {
           for (const existing of existingQuadrantHashes) {
             if (notifiedPartialCaves.has(existing.cave)) continue;
-            // CHANGE: Compare hashes for equality instead of similarity
             if (newSubHash === existing.hash) {
-              await session.send(`图片局部与回声洞（${existing.cave}）存在完全相同的区块`);
+              await session.send(`图片与回声洞（${existing.cave}）局部相同`);
               notifiedPartialCaves.add(existing.cave);
             }
           }
