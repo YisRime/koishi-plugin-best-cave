@@ -34,7 +34,6 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const processedElements = await Promise.all(caveHElements.map(async (element) => {
     const isMedia = ['image', 'video', 'audio', 'file'].includes(element.type);
     const fileName = element.attrs.src as string;
-
     if (!isMedia || !fileName) return element;
 
     if (config.enableS3 && config.publicUrl) {
@@ -60,7 +59,6 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   if (header) finalMessage.push(header + '\n');
   finalMessage.push(...processedElements);
   if (footer) finalMessage.push('\n' + footer);
-
   return finalMessage;
 }
 
@@ -134,7 +132,6 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
   if (existingIds.size === (allCaveIds.length > 0 ? Math.max(...allCaveIds) : 0)) {
     reusableIds.add(0);
   }
-
   return newId;
 }
 
@@ -216,72 +213,44 @@ export async function handleFileUploads(
     const downloadedMedia: { fileName: string, buffer: Buffer }[] = [];
     const imageHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
 
-    const existingHashes = hashManager ? await ctx.database.get('cave_hash', { type: { $ne: 'simhash' } }) : [];
-    const existingColorPHashes = existingHashes.filter(h => h.type === 'phash_color');
-    const existingDHashes = existingHashes.filter(h => h.type === 'dhash_gray');
-    const existingSubHashObjects = existingHashes.filter(h => h.type.startsWith('sub_phash_'));
+    const allExistingImageHashes = hashManager ? await ctx.database.get('cave_hash', { type: { $ne: 'simhash' } }) : [];
+    const existingGlobalHashes = allExistingImageHashes.filter(h => h.type === 'phash_g');
+    const existingQuadrantHashes = allExistingImageHashes.filter(h => h.type.startsWith('phash_q'));
 
     for (const media of mediaToToSave) {
       const buffer = Buffer.from(await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 }));
       downloadedMedia.push({ fileName: media.fileName, buffer });
 
       if (hashManager && ['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(media.fileName).toLowerCase())) {
-        const { colorPHash, dHash, subHashes } = await hashManager.generateAllImageHashes(buffer);
+        const { globalHash, quadrantHashes } = await hashManager.generateAllImageHashes(buffer);
 
-        let caveToDelete: number | null = null;
-        let highestCombinedSimilarity = 0;
-
-        const similarityScores = new Map<number, { colorSim?: number, dSim?: number }>();
-
-        for (const existing of existingColorPHashes) {
-            const similarity = hashManager.calculateSimilarity(colorPHash, existing.hash);
-            if (similarity >= config.imageWholeThreshold) {
-                if (!similarityScores.has(existing.cave)) similarityScores.set(existing.cave, {});
-                similarityScores.get(existing.cave)!.colorSim = similarity;
-            }
-        }
-        for (const existing of existingDHashes) {
-            const similarity = hashManager.calculateSimilarity(dHash, existing.hash);
-             if (similarity >= config.imageWholeThreshold) {
-                if (!similarityScores.has(existing.cave)) similarityScores.set(existing.cave, {});
-                similarityScores.get(existing.cave)!.dSim = similarity;
-            }
-        }
-
-        for (const [caveId, scores] of similarityScores.entries()) {
-            if (scores.colorSim && scores.dSim) {
-                caveToDelete = caveId;
-                highestCombinedSimilarity = scores.colorSim;
-                break;
-            }
-        }
-
-        if (caveToDelete) {
-            await session.send(`图片与回声洞（${caveToDelete}）的相似度为 ${(highestCombinedSimilarity * 100).toFixed(2)}%，超过阈值`);
+        for (const existing of existingGlobalHashes) {
+          const similarity = hashManager.calculateSimilarity(globalHash, existing.hash);
+          if (similarity >= config.imageWholeThreshold) {
+            await session.send(`图片与回声洞（${existing.cave}）的相似度为 ${similarity.toFixed(2)}%，超过阈值`);
             await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
             cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
             return;
+          }
         }
 
         const notifiedPartialCaves = new Set<number>();
-        for (const newSubHash of Object.values(subHashes)) {
-            for (const existing of existingSubHashObjects) {
-                if (notifiedPartialCaves.has(existing.cave)) continue;
-
-                const similarity = hashManager.calculateSimilarity(newSubHash, existing.hash);
-                if (similarity >= config.imagePartThreshold) {
-                    await session.send(`图片局部与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%`);
-                    notifiedPartialCaves.add(existing.cave);
-                }
+        for (const newSubHash of Object.values(quadrantHashes)) {
+          for (const existing of existingQuadrantHashes) {
+            if (notifiedPartialCaves.has(existing.cave)) continue;
+            // CHANGE: Compare hashes for equality instead of similarity
+            if (newSubHash === existing.hash) {
+              await session.send(`图片局部与回声洞（${existing.cave}）存在完全相同的区块`);
+              notifiedPartialCaves.add(existing.cave);
             }
+          }
         }
 
-        imageHashesToStore.push({ hash: colorPHash, type: 'phash_color' });
-        imageHashesToStore.push({ hash: dHash, type: 'dhash_gray' });
-        imageHashesToStore.push({ hash: subHashes.q1, type: 'sub_phash_q1' });
-        imageHashesToStore.push({ hash: subHashes.q2, type: 'sub_phash_q2' });
-        imageHashesToStore.push({ hash: subHashes.q3, type: 'sub_phash_q3' });
-        imageHashesToStore.push({ hash: subHashes.q4, type: 'sub_phash_q4' });
+        imageHashesToStore.push({ hash: globalHash, type: 'phash_g' });
+        imageHashesToStore.push({ hash: quadrantHashes.q1, type: 'phash_q1' });
+        imageHashesToStore.push({ hash: quadrantHashes.q2, type: 'phash_q2' });
+        imageHashesToStore.push({ hash: quadrantHashes.q3, type: 'phash_q3' });
+        imageHashesToStore.push({ hash: quadrantHashes.q4, type: 'phash_q4' });
       }
     }
 

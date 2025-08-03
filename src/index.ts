@@ -63,7 +63,6 @@ export interface Config {
   enableSimilarity: boolean;
   textThreshold: number;
   imageWholeThreshold: number;
-  imagePartThreshold: number;
   localPath?: string;
   enableS3: boolean;
   endpoint?: string;
@@ -86,9 +85,8 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enableReview: Schema.boolean().default(false).description("启用审核"),
     enableSimilarity: Schema.boolean().default(false).description("启用查重"),
-    textThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('文本相似度阈值'),
-    imageWholeThreshold: Schema.number().min(0).max(1).step(0.01).default(0.9).description('图片整体相似度阈值'),
-    imagePartThreshold: Schema.number().min(0).max(1).step(0.01).default(0.95).description('图片局部相似度阈值'),
+    textThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('文本相似度阈值 (%)'),
+    imageWholeThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('图片相似度阈值 (%)'),
   }).description('复核配置'),
   Schema.object({
     localPath: Schema.string().description('文件映射路径'),
@@ -186,7 +184,7 @@ export function apply(ctx: Context, config: Config) {
                 for (const existing of existingTextHashes) {
                   const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
                   if (similarity >= config.textThreshold) {
-                    return `文本与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`;
+                    return `文本与回声洞（${existing.cave}）的相似度为 ${similarity.toFixed(2)}%，超过阈值`;
                   }
                 }
                 textHashesToStore.push({ hash: newSimhash, type: 'simhash' });
