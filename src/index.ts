@@ -178,15 +178,17 @@ export function apply(ctx: Context, config: Config) {
 
           if (combinedText) {
             const newSimhash = hashManager.generateTextSimhash(combinedText);
-            const existingTextHashes = await ctx.database.get('cave_hash', { type: 'simhash' });
+            if (newSimhash) {
+                const existingTextHashes = await ctx.database.get('cave_hash', { type: 'simhash' });
 
-            for (const existing of existingTextHashes) {
-              const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
-              if (similarity >= config.textThreshold) {
-                return `文本与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`;
-              }
+                for (const existing of existingTextHashes) {
+                  const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
+                  if (similarity >= config.textThreshold) {
+                    return `文本与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`;
+                  }
+                }
+                textHashesToStore.push({ hash: newSimhash, type: 'simhash' });
             }
-            textHashesToStore.push({ hash: newSimhash, type: 'simhash' });
           }
         }
 

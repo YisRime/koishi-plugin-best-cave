@@ -132,7 +132,9 @@ export class HashManager {
     const combinedText = cave.elements.filter(el => el.type === 'text' && el.content).map(el => el.content).join(' ');
     if (combinedText) {
         const textHash = this.generateTextSimhash(combinedText);
-        allHashes.push({ cave: cave.id, hash: textHash, type: 'simhash' });
+        if (textHash) {
+            allHashes.push({ cave: cave.id, hash: textHash, type: 'simhash' });
+        }
     }
 
     for (const el of cave.elements.filter(el => el.type === 'image' && el.file)) {
@@ -294,7 +296,6 @@ export class HashManager {
     const bHash = this._calculateHashFromRawChannel(b, 16);
 
     const combinedHash = rHash + gHash + bHash; // 768 bits
-    // Convert 768-bit binary string to a 192-char hex string
     let hex = '';
     for (let i = 0; i < combinedHash.length; i += 4) {
         hex += parseInt(combinedHash.substring(i, i + 4), 2).toString(16);
