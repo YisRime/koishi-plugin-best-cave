@@ -3,7 +3,7 @@ import { FileManager } from './FileManager'
 import { ProfileManager } from './ProfileManager'
 import { DataManager } from './DataManager'
 import { ReviewManager } from './ReviewManager'
-import { HashManager } from './HashManager'
+import { HashManager, CaveHashObject } from './HashManager'
 import * as utils from './Utils'
 
 export const name = 'best-cave'
@@ -43,15 +43,6 @@ export interface CaveObject {
   userName: string;
   status: 'active' | 'delete' | 'pending' | 'preload';
   time: Date;
-}
-
-/**
- * @description 数据库 `cave_hash` 表的完整对象模型。
- */
-export interface CaveHashObject {
-  cave: number;
-  hash: string;
-  type: 'sim' | 'phash' | 'sub';
 }
 
 declare module 'koishi' {
@@ -187,7 +178,7 @@ export function apply(ctx: Context, config: Config) {
 
           if (combinedText) {
             const newSimhash = hashManager.generateTextSimhash(combinedText);
-            const existingTextHashes = await ctx.database.get('cave_hash', { type: 'sim' });
+            const existingTextHashes = await ctx.database.get('cave_hash', { type: 'simhash' });
 
             for (const existing of existingTextHashes) {
               const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
@@ -195,7 +186,7 @@ export function apply(ctx: Context, config: Config) {
                 return `文本与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`;
               }
             }
-            textHashesToStore.push({ hash: newSimhash, type: 'sim' });
+            textHashesToStore.push({ hash: newSimhash, type: 'simhash' });
           }
         }
 

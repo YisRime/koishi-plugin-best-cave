@@ -1,8 +1,8 @@
 import { Context, h, Logger, Session } from 'koishi';
 import * as path from 'path';
-import { CaveObject, Config, StoredElement, CaveHashObject } from './index';
+import { CaveObject, Config, StoredElement } from './index';
 import { FileManager } from './FileManager';
-import { HashManager } from './HashManager';
+import { HashManager, CaveHashObject } from './HashManager';
 import { ReviewManager } from './ReviewManager';
 
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
@@ -207,20 +207,6 @@ export async function processMessageElements(sourceElements: h[], newId: number,
   return { finalElementsForDb, mediaToSave };
 }
 
-/**
- * @description 异步处理文件上传、查重和状态更新的后台任务。
- * @param ctx - Koishi 上下文。
- * @param config - 插件配置。
- * @param fileManager - FileManager 实例，用于保存文件。
- * @param logger - 日志记录器实例。
- * @param reviewManager - ReviewManager 实例，用于提交审核。
- * @param cave - 刚刚在数据库中创建的 `preload` 状态的回声洞对象。
- * @param mediaToSave - 需要下载和处理的媒体文件列表。
- * @param reusableIds - 可复用 ID 的内存缓存。
- * @param session - 触发此操作的用户会话，用于发送反馈。
- * @param hashManager - HashManager 实例，如果启用则用于哈希计算和比较。
- * @param textHashesToStore - 已预先计算好的、待存入数据库的文本哈希对象数组。
- */
 export async function handleFileUploads(
   ctx: Context, config: Config, fileManager: FileManager, logger: Logger,
   reviewManager: ReviewManager, cave: CaveObject, mediaToToSave: { sourceUrl: string, fileName: string }[],
@@ -230,40 +216,72 @@ export async function handleFileUploads(
     const downloadedMedia: { fileName: string, buffer: Buffer }[] = [];
     const imageHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
 
-    const existingPHashes = hashManager ? await ctx.database.get('cave_hash', { type: 'phash' }) : [];
-    const existingSubHashes = hashManager ? await ctx.database.get('cave_hash', { type: 'sub' }) : [];
+    const existingHashes = hashManager ? await ctx.database.get('cave_hash', { type: { $ne: 'simhash' } }) : [];
+    const existingColorPHashes = existingHashes.filter(h => h.type === 'phash_color');
+    const existingDHashes = existingHashes.filter(h => h.type === 'dhash_gray');
+    const existingSubHashObjects = existingHashes.filter(h => h.type.startsWith('sub_phash_'));
 
     for (const media of mediaToToSave) {
       const buffer = Buffer.from(await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 }));
       downloadedMedia.push({ fileName: media.fileName, buffer });
 
       if (hashManager && ['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(media.fileName).toLowerCase())) {
-        const pHash = await hashManager.generateImagePHash(buffer);
-        for (const existing of existingPHashes) {
-          const similarity = hashManager.calculateSimilarity(pHash, existing.hash);
-          if (similarity >= config.imageThreshold) {
-            await session.send(`图片与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%，超过阈值`);
-            await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
-            reusableIds.add(cave.id);
-            return;
-          }
-        }
+        const { colorPHash, dHash, subHashes } = await hashManager.generateAllImageHashes(buffer);
 
-        const pHashEntry: Omit<CaveHashObject, 'cave'> = { hash: pHash, type: 'phash' };
-        imageHashesToStore.push(pHashEntry);
+        let caveToDelete: number | null = null;
+        let highestCombinedSimilarity = 0;
 
-        const subHashes = await hashManager.generateImageSubHashes(buffer);
-        for (const newSubHash of subHashes) {
-          for (const existing of existingSubHashes) {
-            const similarity = hashManager.calculateSimilarity(newSubHash, existing.hash);
+        const similarityScores = new Map<number, { colorSim?: number, dSim?: number }>();
+
+        for (const existing of existingColorPHashes) {
+            const similarity = hashManager.calculateSimilarity(colorPHash, existing.hash);
             if (similarity >= config.imageThreshold) {
-              await session.send(`图片局部与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%`);
+                if (!similarityScores.has(existing.cave)) similarityScores.set(existing.cave, {});
+                similarityScores.get(existing.cave)!.colorSim = similarity;
             }
-          }
+        }
+        for (const existing of existingDHashes) {
+            const similarity = hashManager.calculateSimilarity(dHash, existing.hash);
+             if (similarity >= config.imageThreshold) {
+                if (!similarityScores.has(existing.cave)) similarityScores.set(existing.cave, {});
+                similarityScores.get(existing.cave)!.dSim = similarity;
+            }
         }
 
-        const subHashEntries: Omit<CaveHashObject, 'cave'>[] = [...subHashes].map(sh => ({ hash: sh, type: 'sub' }));
-        imageHashesToStore.push(...subHashEntries);
+        for (const [caveId, scores] of similarityScores.entries()) {
+            if (scores.colorSim && scores.dSim) {
+                caveToDelete = caveId;
+                highestCombinedSimilarity = scores.colorSim;
+                break;
+            }
+        }
+
+        if (caveToDelete) {
+            await session.send(`图片与回声洞（${caveToDelete}）的相似度为 ${(highestCombinedSimilarity * 100).toFixed(2)}%，超过阈值`);
+            await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
+            cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
+            return;
+        }
+
+        const notifiedPartialCaves = new Set<number>();
+        for (const newSubHash of Object.values(subHashes)) {
+            for (const existing of existingSubHashObjects) {
+                if (notifiedPartialCaves.has(existing.cave)) continue;
+
+                const similarity = hashManager.calculateSimilarity(newSubHash, existing.hash);
+                if (similarity >= config.imageThreshold) {
+                    await session.send(`图片局部与回声洞（${existing.cave}）的相似度为 ${(similarity * 100).toFixed(2)}%`);
+                    notifiedPartialCaves.add(existing.cave);
+                }
+            }
+        }
+
+        imageHashesToStore.push({ hash: colorPHash, type: 'phash_color' });
+        imageHashesToStore.push({ hash: dHash, type: 'dhash_gray' });
+        imageHashesToStore.push({ hash: subHashes.q1, type: 'sub_phash_q1' });
+        imageHashesToStore.push({ hash: subHashes.q2, type: 'sub_phash_q2' });
+        imageHashesToStore.push({ hash: subHashes.q3, type: 'sub_phash_q3' });
+        imageHashesToStore.push({ hash: subHashes.q4, type: 'sub_phash_q4' });
       }
     }
 
