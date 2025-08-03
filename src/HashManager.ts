@@ -261,12 +261,16 @@ export class HashManager {
     return report.trim();
   }
 
-  private async _generateSingleChannelPHash(channelBuffer: Buffer, size: 16): Promise<string> {
-    // This helper assumes input is already a single channel buffer
-    const pixelData = await sharp(channelBuffer).resize(size, size, { fit: 'fill' }).raw().toBuffer();
-    const totalLuminance = pixelData.reduce((acc, val) => acc + val, 0);
+  /**
+   * @description 从单通道原始像素数据计算pHash。
+   * @param channelData - 单通道的像素值数组。
+   * @param size - 图像的边长（例如16）。
+   * @returns {string} 该通道的二进制哈希字符串。
+   */
+  private _calculateHashFromRawChannel(channelData: number[], size: number): string {
+    const totalLuminance = channelData.reduce((acc, val) => acc + val, 0);
     const avgLuminance = totalLuminance / (size * size);
-    return Array.from(pixelData).map(lum => lum > avgLuminance ? '1' : '0').join('');
+    return channelData.map(lum => lum > avgLuminance ? '1' : '0').join('');
   }
 
   /**
@@ -277,7 +281,7 @@ export class HashManager {
   public async generateColorPHash(imageBuffer: Buffer): Promise<string> {
     const { data, info } = await sharp(imageBuffer).resize(16, 16, { fit: 'fill' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     const { channels } = info;
-    const r = [], g = [], b = [];
+    const r: number[] = [], g: number[] = [], b: number[] = [];
 
     for (let i = 0; i < data.length; i += channels) {
         r.push(data[i]);
@@ -285,11 +289,9 @@ export class HashManager {
         b.push(data[i + 2]);
     }
 
-    const [rHash, gHash, bHash] = await Promise.all([
-      this._generateSingleChannelPHash(Buffer.from(r), 16),
-      this._generateSingleChannelPHash(Buffer.from(g), 16),
-      this._generateSingleChannelPHash(Buffer.from(b), 16)
-    ]);
+    const rHash = this._calculateHashFromRawChannel(r, 16);
+    const gHash = this._calculateHashFromRawChannel(g, 16);
+    const bHash = this._calculateHashFromRawChannel(b, 16);
 
     const combinedHash = rHash + gHash + bHash; // 768 bits
     // Convert 768-bit binary string to a 192-char hex string
