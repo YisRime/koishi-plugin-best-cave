@@ -91,34 +91,63 @@ export class HashManager {
    */
   public async generateHashesForHistoricalCaves(): Promise<string> {
     const allCaves = await this.ctx.database.get('cave', { status: 'active' });
-    const existingHashedCaveIds = new Set((await this.ctx.database.get('cave_hash', {}, { fields: ['cave'] })).map(h => h.cave));
+    const existingHashes = await this.ctx.database.get('cave_hash', {}, { fields: ['cave', 'hash', 'type'] });
+    const existingHashSet = new Set(existingHashes.map(h => `${h.cave}-${h.hash}-${h.type}`));
+    const processedCaveIds = new Set(existingHashes.map(h => h.cave));
+
+    const cavesToProcess = allCaves.filter(cave => !processedCaveIds.has(cave.id));
+    const totalToProcessCount = cavesToProcess.length;
+
+    if (totalToProcessCount === 0) {
+      return '无需补全回声洞哈希';
+    }
+
+    this.logger.info(`开始补全 ${totalToProcessCount} 个回声洞的哈希...`);
 
     let hashesToInsert: CaveHashObject[] = [];
-    let historicalCount = 0;
+    const batchHashSet = new Set<string>();
+    let processedCaveCount = 0;
     let totalHashesGenerated = 0;
+    let errorCount = 0;
 
-    for (const cave of allCaves) {
-      if (existingHashedCaveIds.has(cave.id)) continue;
+    const flushBatch = async () => {
+      const batchSize = hashesToInsert.length;
+      if (batchSize === 0) return;
 
-      historicalCount++;
-      const newHashesForCave = await this.generateAllHashesForCave(cave);
-      hashesToInsert.push(...newHashesForCave);
+      await this.ctx.database.upsert('cave_hash', hashesToInsert);
+      totalHashesGenerated += batchSize;
+      this.logger.info(`正在导入 ${batchSize} 条回声洞哈希... (已处理 ${processedCaveCount}/${totalToProcessCount})`);
+
+      hashesToInsert = [];
+      batchHashSet.clear();
+    };
+
+    for (const cave of cavesToProcess) {
+      processedCaveCount++;
+
+      try {
+        const newHashesForCave = await this.generateAllHashesForCave(cave);
+        for (const hashObj of newHashesForCave) {
+          const uniqueKey = `${hashObj.cave}-${hashObj.hash}-${hashObj.type}`;
+          if (!existingHashSet.has(uniqueKey) && !batchHashSet.has(uniqueKey)) {
+            hashesToInsert.push(hashObj);
+            batchHashSet.add(uniqueKey);
+          }
+        }
+      } catch (error) {
+        errorCount++;
+        this.logger.warn(`补全回声洞（${cave.id}）时发生错误: ${error.message}`);
+        continue;
+      }
 
       if (hashesToInsert.length >= 100) {
-        await this.ctx.database.upsert('cave_hash', hashesToInsert);
-        totalHashesGenerated += hashesToInsert.length;
-        hashesToInsert = [];
+        await flushBatch();
       }
     }
 
-    if (hashesToInsert.length > 0) {
-      await this.ctx.database.upsert('cave_hash', hashesToInsert);
-      totalHashesGenerated += hashesToInsert.length;
-    }
+    await flushBatch();
 
-    return totalHashesGenerated > 0
-      ? `已补全 ${historicalCount} 个回声洞的 ${totalHashesGenerated} 条哈希`
-      : '无需补全回声洞哈希';
+    return `已补全 ${totalToProcessCount} 个回声洞的 ${totalHashesGenerated} 条哈希（失败${errorCount} 条）`;
   }
 
   /**
@@ -385,12 +414,29 @@ export class HashManager {
    * @returns {string} 64位二进制 Simhash 对应的16位十六进制字符串。
    */
   public generateTextSimhash(text: string): string {
-    if (!text?.trim()) return '';
-    const tokens = text.toLowerCase().split(/[^a-z0-9\u4e00-\u9fa5]+/).filter(Boolean);
-    if (tokens.length === 0) return '';
+    const cleanText = (text || '').toLowerCase().replace(/\s+/g, '');
+    if (!cleanText) {
+      return '';
+    }
+
+    const n = 2; // N-gram 的大小。
+    const tokens = new Set<string>();
+
+    if (cleanText.length < n) {
+      tokens.add(cleanText);
+    } else {
+      for (let i = 0; i <= cleanText.length - n; i++) {
+        tokens.add(cleanText.substring(i, i + n));
+      }
+    }
+
+    const tokenArray = Array.from(tokens);
+    if (tokenArray.length === 0) {
+      return '';
+    }
 
     const vector = new Array(64).fill(0);
-    tokens.forEach(token => {
+    tokenArray.forEach(token => {
       const hash = crypto.createHash('md5').update(token).digest();
       for (let i = 0; i < 64; i++) {
         vector[i] += (hash[Math.floor(i / 8)]! >> (i % 8)) & 1 ? 1 : -1;
