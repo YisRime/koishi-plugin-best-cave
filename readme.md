@@ -28,6 +28,8 @@
 | `cave.view <序号>` | `cave -g <序号>` | 查看指定序号的回声洞。 |
 | `cave.del <序号>` | `cave -r <序号>` | 删除指定序号的回声洞。仅投稿人或在管理群组内的管理员可操作。 |
 | `cave.list` | `cave -l` | 查询并列出自己投稿过的所有回声洞序号及总数。 |
+| | `-u <用户>` | 查询指定用户（需@或使用ID）投稿的所有回声洞。 |
+| | `-a` | **(仅限管理群组)** 查看所有用户的投稿数量排行榜。 |
 
 ### 模块化指令
 
@@ -35,11 +37,11 @@
 
 | 指令 | 所需配置 | 说明 |
 | :--- | :--- | :--- |
-| `cave.profile [昵称]` | `enableProfile: true` | 设置你在回声洞中显示的昵称。若不提供昵称，则清除现有设置。 |
-| `cave.review` | `enableReview: true` | **(仅限管理群组)** 列出所有待审核的回声洞ID。 |
-| `cave.review <序号>` | `enableReview: true` | **(仅限管理群组)** 查看指定待审核内容的详情。 |
-| `cave.review.Y [序号]` | `enableReview: true` | **(仅限管理群组)** 通过审核。若不提供序号，则通过所有待审核内容。 |
-| `cave.review.N [序号]` | `enableReview: true` | **(仅限管理群组)** 拒绝审核。若不提供序号，则拒绝所有待审核内容。 |
+| `cave.name [昵称]` | `enableName: true` | 设置你在回声洞中显示的昵称。若不提供昵称，则清除现有设置。 |
+| `cave.pend` | `enablePend: true` | **(仅限管理群组)** 列出所有待审核的回声洞ID。 |
+| `cave.pend <序号>` | `enablePend: true` | **(仅限管理群组)** 查看指定待审核内容的详情。 |
+| `cave.pend.Y [序号]` | `enablePend: true` | **(仅限管理群组)** 通过审核。若不提供序号，则通过所有待审核内容。 |
+| `cave.pend.N [序号]` | `enablePend: true` | **(仅限管理群组)** 拒绝审核。若不提供序号，则拒绝所有待审核内容。 |
 | `cave.export` | `enableIO: true` | **(仅限管理群组)** 将所有`active`状态的回声洞导出到 `cave_export.json`。 |
 | `cave.import` | `enableIO: true` | **(仅限管理群组)** 从 `cave_import.json` 文件中导入数据。 |
 | `cave.hash` | `enableSimilarity: true` | **(仅限管理群组)** 校验所有历史数据，为缺失哈希的回声洞补全记录。 |
@@ -51,9 +53,9 @@
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `coolDown` | `number` | `10` | `cave` 和 `cave.view` 指令的冷却时间（秒）。 |
+| `coolDown` | `number` | `10` | `cave` 和 `cave.view` 指令的冷却时间（秒）。在管理群组中无冷却。 |
 | `perChannel` | `boolean` | `false` | 是否启用分群模式。`true` 表示各群的回声洞独立。 |
-| `enableProfile` | `boolean` | `false` | 是否启用自定义昵称功能 (`cave.profile` 指令)。 |
+| `enableName` | `boolean` | `false` | 是否启用自定义昵称功能 (`cave.name` 指令)。 |
 | `enableIO` | `boolean` | `false` | 是否启用数据导入/导出功能 (`cave.export` / `.import` 指令)。 |
 | `adminChannel` | `string` | `'onebot:'` | **管理群组ID**。格式为 `平台名:群号`，如 `onebot:12345678`。审核、数据等管理指令仅在此群组生效。 |
 | `caveFormat` | `string` | `'回声洞 ——（{id}）\|—— {name}'` | 回声洞消息的显示格式。`{id}`是序号，`{name}`是昵称，`\|`为换行符。 |
@@ -62,10 +64,10 @@
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `enableReview` | `boolean` | `false` | 是否启用审核机制。启用后，新投稿将进入`pending`状态。 |
+| `enablePend` | `boolean` | `false` | 是否启用审核机制。启用后，新投稿将进入`pending`状态。 |
 | `enableSimilarity` | `boolean` | `false` | 是否启用内容相似度检查（查重）。 |
 | `textThreshold` | `number` | `95` | **文本**相似度阈值 (0-100)。基于Simhash汉明距离计算，超过此值将被拒绝。 |
-| `imageWholeThreshold` | `number` | `95` | **图片整体**相似度阈值 (0-100)。基于pHash汉明距离计算，超过此值将被拒绝。 |
+| `imageThreshold` | `number` | `95` | **图片整体**相似度阈值 (0-100)。基于pHash汉明距离计算，超过此值将被拒绝。 |
 
 ### 存储配置
 

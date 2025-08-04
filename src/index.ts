@@ -1,8 +1,8 @@
 import { Context, Schema, Logger, h } from 'koishi'
 import { FileManager } from './FileManager'
-import { ProfileManager } from './ProfileManager'
+import { NameManager } from './NameManager'
 import { DataManager } from './DataManager'
-import { ReviewManager } from './ReviewManager'
+import { PendManager } from './PendManager'
 import { HashManager, CaveHashObject } from './HashManager'
 import * as utils from './Utils'
 
@@ -56,13 +56,13 @@ export interface Config {
   coolDown: number;
   perChannel: boolean;
   adminChannel: string;
-  enableProfile: boolean;
+  enableName: boolean;
   enableIO: boolean;
-  enableReview: boolean;
+  enablePend: boolean;
   caveFormat: string;
   enableSimilarity: boolean;
   textThreshold: number;
-  imageWholeThreshold: number;
+  imageThreshold: number;
   localPath?: string;
   enableS3: boolean;
   endpoint?: string;
@@ -77,16 +77,16 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     coolDown: Schema.number().default(10).description("冷却时间（秒）"),
     perChannel: Schema.boolean().default(false).description("启用分群模式"),
-    enableProfile: Schema.boolean().default(false).description("启用自定义昵称"),
+    enableName: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
     adminChannel: Schema.string().default('onebot:').description("管理群组 ID"),
     caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本'),
   }).description("基础配置"),
   Schema.object({
-    enableReview: Schema.boolean().default(false).description("启用审核"),
+    enablePend: Schema.boolean().default(false).description("启用审核"),
     enableSimilarity: Schema.boolean().default(false).description("启用查重"),
     textThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('文本相似度阈值 (%)'),
-    imageWholeThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('图片相似度阈值 (%)'),
+    imageThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('图片相似度阈值 (%)'),
   }).description('复核配置'),
   Schema.object({
     localPath: Schema.string().description('文件映射路径'),
@@ -114,8 +114,8 @@ export function apply(ctx: Context, config: Config) {
   const fileManager = new FileManager(ctx.baseDir, config, logger);
   const lastUsed = new Map<string, number>();
   const reusableIds = new Set<number>();
-  const profileManager = config.enableProfile ? new ProfileManager(ctx) : null;
-  const reviewManager = config.enableReview ? new ReviewManager(ctx, config, fileManager, logger, reusableIds) : null;
+  const profileManager = config.enableName ? new NameManager(ctx) : null;
+  const reviewManager = config.enablePend ? new PendManager(ctx, config, fileManager, logger, reusableIds) : null;
   const hashManager = config.enableSimilarity ? new HashManager(ctx, config, logger, fileManager) : null;
   const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger, hashManager) : null;
 
@@ -192,9 +192,9 @@ export function apply(ctx: Context, config: Config) {
           }
         }
 
-        const userName = (config.enableProfile ? await profileManager.getNickname(session.userId) : null) || session.username;
+        const userName = (config.enableName ? await profileManager.getNickname(session.userId) : null) || session.username;
         const hasMedia = mediaToSave.length > 0;
-        const initialStatus = hasMedia ? 'preload' : (config.enableReview ? 'pending' : 'active');
+        const initialStatus = hasMedia ? 'preload' : (config.enablePend ? 'pending' : 'active');
 
         const newCave = await ctx.database.create('cave', {
           id: newId,
@@ -213,11 +213,11 @@ export function apply(ctx: Context, config: Config) {
             await ctx.database.upsert('cave_hash', textHashesToStore.map(h => ({ ...h, cave: newCave.id })));
           }
           if (initialStatus === 'pending') {
-            reviewManager.sendForReview(newCave);
+            reviewManager.sendForPend(newCave);
           }
         }
 
-        return (initialStatus === 'pending' || (initialStatus === 'preload' && config.enableReview))
+        return (initialStatus === 'pending' || (initialStatus === 'preload' && config.enablePend))
           ? `提交成功，序号为（${newCave.id}）`
           : `添加成功，序号为（${newCave.id}）`;
       } catch (error) {
@@ -263,17 +263,53 @@ export function apply(ctx: Context, config: Config) {
       }
     });
 
-  cave.subcommand('.list', '查询我的投稿')
-    .action(async ({ session }) => {
-      try {
-        const userCaves = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), userId: session.userId });
-        if (!userCaves.length) return '你还没有投稿过回声洞';
-        const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join('|');
-        return `你已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;
-      } catch (error) {
-        logger.error('查询投稿列表失败:', error);
-        return '查询失败，请稍后再试';
+  cave.subcommand('.list', '查询投稿统计')
+    .option('user', '-u <user:user> 指定用户')
+    .option('all', '-a 查看排行')
+    .action(async ({ session, options }) => {
+      if (options.all) {
+        const adminChannelId = config.adminChannel?.split(':')[1];
+        if (session.channelId !== adminChannelId) {
+          return '此指令仅限在管理群组中使用';
+        }
+        try {
+          const allCaves = await ctx.database.get('cave', { status: 'active' });
+          if (!allCaves.length) return '目前没有任何回声洞投稿。';
+
+          const userStats = new Map<string, { userName: string, count: number }>();
+          for (const cave of allCaves) {
+            const { userId, userName } = cave;
+            const stat = userStats.get(userId);
+            if (stat) {
+              stat.count++;
+              stat.userName = userName;
+            } else {
+              userStats.set(userId, { userName, count: 1 });
+            }
+          }
+
+          const sortedStats = Array.from(userStats.values()).sort((a, b) => b.count - a.count);
+          let report = '回声洞投稿数量排行：\n';
+          sortedStats.forEach((stat, index) => {
+            report += `${index + 1}. ${stat.userName}: ${stat.count} 条\n`;
+          });
+          return report.trim();
+        } catch (error) {
+          logger.error('查询排行失败:', error);
+          return '查询失败，请稍后再试';
+        }
       }
+
+      const targetUserId = options.user || session.userId;
+      const isQueryingSelf = !options.user;
+
+      const query = { ...utils.getScopeQuery(session, config), userId: targetUserId };
+      const userCaves = await ctx.database.get('cave', query);
+      if (!userCaves.length) return isQueryingSelf ? '你还没有投稿过回声洞' : `用户 ${targetUserId} 还没有投稿过回声洞`;
+
+      const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join('|');
+      const userName = userCaves.sort((a,b) => b.time.getTime() - a.time.getTime())[0].userName;
+      return `${isQueryingSelf ? '你' : userName}已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;
     });
 
   if (profileManager) profileManager.registerCommands(cave);

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { CaveObject, Config, StoredElement } from './index';
 import { FileManager } from './FileManager';
 import { HashManager, CaveHashObject } from './HashManager';
-import { ReviewManager } from './ReviewManager';
+import { PendManager } from './PendManager';
 
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
 
@@ -140,6 +140,10 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
  * @returns 若在冷却中则提示字符串，否则 null。
  */
 export function checkCooldown(session: Session, config: Config, lastUsed: Map<string, number>): string | null {
+  const adminChannelId = config.adminChannel?.split(':')[1];
+  if (adminChannelId && session.channelId === adminChannelId) {
+    return null;
+  }
   if (config.coolDown <= 0 || !session.channelId) return null;
   const lastTime = lastUsed.get(session.channelId) || 0;
   const remainingTime = (lastTime + config.coolDown * 1000) - Date.now();
@@ -206,7 +210,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
 
 export async function handleFileUploads(
   ctx: Context, config: Config, fileManager: FileManager, logger: Logger,
-  reviewManager: ReviewManager, cave: CaveObject, mediaToToSave: { sourceUrl: string, fileName: string }[],
+  reviewManager: PendManager, cave: CaveObject, mediaToToSave: { sourceUrl: string, fileName: string }[],
   reusableIds: Set<number>, session: Session, hashManager: HashManager, textHashesToStore: Omit<CaveHashObject, 'cave'>[]
 ) {
   try {
@@ -226,7 +230,7 @@ export async function handleFileUploads(
 
         for (const existing of existingGlobalHashes) {
           const similarity = hashManager.calculateSimilarity(globalHash, existing.hash);
-          if (similarity >= config.imageWholeThreshold) {
+          if (similarity >= config.imageThreshold) {
             await session.send(`图片与回声洞（${existing.cave}）的相似度（${similarity.toFixed(2)}%）超过阈值`);
             await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
             cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
@@ -255,7 +259,7 @@ export async function handleFileUploads(
 
     await Promise.all(downloadedMedia.map(item => fileManager.saveFile(item.fileName, item.buffer)));
 
-    const finalStatus = config.enableReview ? 'pending' : 'active';
+    const finalStatus = config.enablePend ? 'pending' : 'active';
     await ctx.database.upsert('cave', [{ id: cave.id, status: finalStatus }]);
 
     if (hashManager) {
@@ -267,7 +271,7 @@ export async function handleFileUploads(
 
     if (finalStatus === 'pending' && reviewManager) {
       const [finalCave] = await ctx.database.get('cave', { id: cave.id });
-      if (finalCave) reviewManager.sendForReview(finalCave);
+      if (finalCave) reviewManager.sendForPend(finalCave);
     }
   } catch (fileProcessingError) {
     logger.error(`回声洞（${cave.id}）文件处理失败:`, fileProcessingError);

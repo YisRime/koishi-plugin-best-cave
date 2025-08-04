@@ -1,22 +1,22 @@
 import { Context } from 'koishi'
 
 /** 数据库 `cave_user` 表的结构。 */
-export interface UserProfile {
+export interface UserName {
   userId: string;
   nickname: string;
 }
 
 declare module 'koishi' {
   interface Tables {
-    cave_user: UserProfile;
+    cave_user: UserName;
   }
 }
 
 /**
- * @class ProfileManager
+ * @class NameManager
  * @description 负责管理用户在回声洞中的自定义昵称。
  */
-export class ProfileManager {
+export class NameManager {
   /**
    * @constructor
    * @param ctx - Koishi 上下文，用于初始化数据库模型。
@@ -31,11 +31,11 @@ export class ProfileManager {
   }
 
   /**
-   * @description 注册 `.profile` 子命令，用于管理用户昵称。
+   * @description 注册 `.name` 子命令，用于管理用户昵称。
    * @param cave - 主 `cave` 命令实例。
    */
   public registerCommands(cave) {
-    cave.subcommand('.profile [nickname:text]', '设置显示昵称')
+    cave.subcommand('.name [nickname:text]', '设置显示昵称')
       .usage('设置在回声洞中显示的昵称。若不提供昵称，则清除现有昵称。')
       .action(async ({ session }, nickname) => {
         const trimmedNickname = nickname?.trim();
@@ -63,8 +63,8 @@ export class ProfileManager {
    * @returns 用户的昵称字符串或 null。
    */
   public async getNickname(userId: string): Promise<string | null> {
-    const [profile] = await this.ctx.database.get('cave_user', { userId });
-    return profile?.nickname ?? null;
+    const [name] = await this.ctx.database.get('cave_user', { userId });
+    return name?.nickname ?? null;
   }
 
   /**

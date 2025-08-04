@@ -71,13 +71,15 @@ export class HashManager {
 
     cave.subcommand('.check', '检查相似度')
       .usage('检查所有回声洞，找出相似度过高的内容。')
+      .option('textThreshold', '-t <threshold:number> 文本相似度阈值 (%)')
+      .option('imageThreshold', '-i <threshold:number> 图片相似度阈值 (%)')
       .action(async (argv) => {
         const checkResult = adminCheck(argv);
         if (checkResult) return checkResult;
 
         await argv.session.send('正在检查，请稍候...');
         try {
-          return await this.checkForSimilarCaves();
+          return await this.checkForSimilarCaves(argv.options);
         } catch (error) {
           this.logger.error('检查相似度失败:', error);
           return `检查失败: ${error.message}`;
@@ -181,16 +183,20 @@ export class HashManager {
 
   /**
    * @description 对数据库中所有哈希进行两两比较，找出相似度过高的内容。
+   * @param options 包含临时阈值的可选对象。
    * @returns 一个包含检查结果的报告字符串。
    */
-  public async checkForSimilarCaves(): Promise<string> {
+  public async checkForSimilarCaves(options: { textThreshold?: number; imageThreshold?: number } = {}): Promise<string> {
+    const textThreshold = options.textThreshold ?? this.config.textThreshold;
+    const imageThreshold = options.imageThreshold ?? this.config.imageThreshold;
+
     const allHashes = await this.ctx.database.get('cave_hash', {});
     const allCaveIds = [...new Set(allHashes.map(h => h.cave))];
 
-    // 分类存储不同类型的哈希
     const textHashes = new Map<number, string>();
     const globalHashes = new Map<number, string>();
-    const quadrantHashes = new Map<number, Set<string>>();
+    const quadrantHashesByCave = new Map<number, Set<string>>();
+    const partialHashToCaves = new Map<string, Set<number>>();
 
     for (const hash of allHashes) {
       if (hash.type === 'simhash') {
@@ -198,15 +204,17 @@ export class HashManager {
       } else if (hash.type === 'phash_g') {
         globalHashes.set(hash.cave, hash.hash);
       } else if (hash.type.startsWith('phash_q')) {
-        if (!quadrantHashes.has(hash.cave)) quadrantHashes.set(hash.cave, new Set<string>());
-        quadrantHashes.get(hash.cave)!.add(hash.hash);
+        if (!quadrantHashesByCave.has(hash.cave)) quadrantHashesByCave.set(hash.cave, new Set<string>());
+        quadrantHashesByCave.get(hash.cave)!.add(hash.hash);
+
+        if (!partialHashToCaves.has(hash.hash)) partialHashToCaves.set(hash.hash, new Set<number>());
+        partialHashToCaves.get(hash.hash)!.add(hash.cave);
       }
     }
 
     const similarPairs = {
       text: new Set<string>(),
       global: new Set<string>(),
-      partial: new Set<string>(),
     };
 
     for (let i = 0; i < allCaveIds.length; i++) {
@@ -220,7 +228,7 @@ export class HashManager {
         const text2 = textHashes.get(id2);
         if (text1 && text2) {
           const similarity = this.calculateSimilarity(text1, text2);
-          if (similarity >= this.config.textThreshold) {
+          if (similarity >= textThreshold) {
             similarPairs.text.add(`${pair} = ${similarity.toFixed(2)}%`);
           }
         }
@@ -230,36 +238,53 @@ export class HashManager {
         const global2 = globalHashes.get(id2);
         if (global1 && global2) {
           const similarity = this.calculateSimilarity(global1, global2);
-          if (similarity >= this.config.imageWholeThreshold) {
+          if (similarity >= imageThreshold) {
             similarPairs.global.add(`${pair} = ${similarity.toFixed(2)}%`);
-          }
-        }
-
-        // 比较图片局部哈希 (pHash_q)
-        const quads1 = quadrantHashes.get(id1);
-        const quads2 = quadrantHashes.get(id2);
-        if (quads1 && quads2 && quads1.size > 0 && quads2.size > 0) {
-          let matchFound = false;
-          for (const h1 of quads1) {
-            if (quads2.has(h1)) {
-              matchFound = true;
-              break;
-            }
-          }
-          if (matchFound) {
-            similarPairs.partial.add(pair);
           }
         }
       }
     }
 
-    const totalFindings = similarPairs.text.size + similarPairs.global.size + similarPairs.partial.size;
+    const allPartialCaveIds = Array.from(quadrantHashesByCave.keys());
+    const parent = new Map<number, number>();
+    const find = (i: number): number => {
+      if (parent.get(i) === i) return i;
+      parent.set(i, find(parent.get(i)!));
+      return parent.get(i)!;
+    };
+    const union = (i: number, j: number) => {
+      const rootI = find(i);
+      const rootJ = find(j);
+      if (rootI !== rootJ) parent.set(rootI, rootJ);
+    };
+
+    allPartialCaveIds.forEach(id => parent.set(id, id));
+
+    for (const caveIds of partialHashToCaves.values()) {
+        if (caveIds.size <= 1) continue;
+        const ids = Array.from(caveIds);
+        for (let i = 1; i < ids.length; i++) union(ids[0], ids[i]);
+    }
+
+    const components = new Map<number, Set<number>>();
+    for (const id of allPartialCaveIds) {
+        const root = find(id);
+        if (!components.has(root)) components.set(root, new Set());
+        components.get(root)!.add(id);
+    }
+
+    const partialGroups: string[] = [];
+    for (const component of components.values()) {
+        if (component.size > 1) partialGroups.push(Array.from(component).sort((a, b) => a - b).join(' & '));
+    }
+
+    const totalFindings = similarPairs.text.size + similarPairs.global.size + partialGroups.length;
     if (totalFindings === 0) return '未发现高相似度的内容';
 
     let report = `已发现 ${totalFindings} 组高相似度的内容:`;
     if (similarPairs.text.size > 0) report += '\n文本内容相似:\n' + [...similarPairs.text].join('\n');
     if (similarPairs.global.size > 0) report += '\n图片整体相似:\n' + [...similarPairs.global].join('\n');
-    if (similarPairs.partial.size > 0) report += '\n图片局部相同:\n' + [...similarPairs.partial].join('\n');
+    if (partialGroups.length > 0) report += '\n图片局部相同:\n' + partialGroups.join('\n');
     return report.trim();
   }
 

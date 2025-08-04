@@ -4,10 +4,10 @@ import { FileManager } from './FileManager';
 import { buildCaveMessage, cleanupPendingDeletions } from './Utils';
 
 /**
- * @class ReviewManager
+ * @class PendManager
  * @description 负责处理回声洞的审核流程，处理新洞的提交、审核通知和审核操作。
  */
-export class ReviewManager {
+export class PendManager {
   /**
    * @param ctx Koishi 上下文。
    * @param config 插件配置。
@@ -35,7 +35,7 @@ export class ReviewManager {
       return null;
     };
 
-    const review = cave.subcommand('.review [id:posint]', '审核回声洞')
+    const pend = cave.subcommand('.pend [id:posint]', '审核回声洞')
       .action(async ({ session }, id) => {
         const adminError = requireAdmin(session);
         if (adminError) return adminError;
@@ -52,7 +52,7 @@ export class ReviewManager {
         return `当前共有 ${pendingCaves.length} 条待审核回声洞，序号为：\n${pendingCaves.map(c => c.id).join('|')}`;
       });
 
-    const createReviewAction = (actionType: 'approve' | 'reject') => async ({ session }, id?: number) => {
+    const createPendAction = (actionType: 'approve' | 'reject') => async ({ session }, id?: number) => {
       const adminError = requireAdmin(session);
       if (adminError) return adminError;
 
@@ -84,23 +84,23 @@ export class ReviewManager {
       }
     };
 
-    review.subcommand('.Y [id:posint]', '通过审核').action(createReviewAction('approve'));
-    review.subcommand('.N [id:posint]', '拒绝审核').action(createReviewAction('reject'));
+    pend.subcommand('.Y [id:posint]', '通过审核').action(createPendAction('approve'));
+    pend.subcommand('.N [id:posint]', '拒绝审核').action(createPendAction('reject'));
   }
 
   /**
    * @description 将新回声洞提交到管理群组以供审核。
    * @param cave 新创建的、状态为 'pending' 的回声洞对象。
    */
-  public async sendForReview(cave: CaveObject): Promise<void> {
+  public async sendForPend(cave: CaveObject): Promise<void> {
     if (!this.config.adminChannel?.includes(':')) {
       this.logger.warn(`管理群组配置无效，已自动通过回声洞（${cave.id}）`);
       await this.ctx.database.upsert('cave', [{ id: cave.id, status: 'active' }]);
       return;
     }
     try {
-      const reviewMessage = [`待审核`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
-      await this.ctx.broadcast([this.config.adminChannel], h.normalize(reviewMessage));
+      const pendMessage = [`待审核`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
+      await this.ctx.broadcast([this.config.adminChannel], h.normalize(pendMessage));
     } catch (error) {
       this.logger.error(`发送回声洞（${cave.id}）审核消息失败:`, error);
     }
