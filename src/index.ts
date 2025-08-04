@@ -85,8 +85,8 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     enablePend: Schema.boolean().default(false).description("启用审核"),
     enableSimilarity: Schema.boolean().default(false).description("启用查重"),
-    textThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('文本相似度阈值 (%)'),
-    imageThreshold: Schema.number().min(0).max(100).step(0.01).default(95).description('图片相似度阈值 (%)'),
+    textThreshold: Schema.number().min(0).max(100).step(0.01).default(90).description('文本相似度阈值 (%)'),
+    imageThreshold: Schema.number().min(0).max(100).step(0.01).default(90).description('图片相似度阈值 (%)'),
   }).description('复核配置'),
   Schema.object({
     localPath: Schema.string().description('文件映射路径'),
