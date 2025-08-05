@@ -198,9 +198,22 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         result.push({ type: 'text', content: el.attrs.content.trim() });
       } else if (type === 'at' && el.attrs.id) {
         result.push({ type: 'at', content: el.attrs.id as string });
-      } else if (type === 'forward' && el.children?.length) {
-        const transformedChildren = await transform(el.children);
-        result.push({ type: 'forward', content: JSON.stringify(transformedChildren) });
+      } else if (type === 'forward') {
+        const childrenToProcess: h[] = [...(el.children || [])];
+        if (Array.isArray(el.attrs.content)) {
+          for (const rawMessage of el.attrs.content) {
+            if (rawMessage && rawMessage.message) {
+              childrenToProcess.push(...h.parse(rawMessage.message));
+            }
+          }
+        }
+
+        if (childrenToProcess.length > 0) {
+            const transformedChildren = await transform(childrenToProcess);
+            if (transformedChildren.length > 0) {
+                 result.push({ type: 'forward', content: JSON.stringify(transformedChildren) });
+            }
+        }
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
         if (fileIdentifier.startsWith('http')) {
