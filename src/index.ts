@@ -27,9 +27,9 @@ const logger = new Logger('best-cave');
  * @description 存储在数据库中的单个消息元素。
  */
 export interface StoredElement {
-  type: 'text' | 'image' | 'video' | 'audio' | 'file';
-  content?: string; // 文本内容
-  file?: string;    // 媒体文件的标识符 (本地文件名或 S3 Key)
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'at' | 'forward';
+  content?: string; // text content, atId, or JSON.stringified StoredElement[] for forward
+  file?: string;    // for media
 }
 
 /**

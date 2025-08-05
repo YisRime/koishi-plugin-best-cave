@@ -8,19 +8,6 @@ import { PendManager } from './PendManager';
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
 
 /**
- * @description 将数据库存储的 StoredElement[] 转换为 Koishi 的 h() 元素数组。
- * @param elements 从数据库读取的元素数组。
- * @returns 转换后的 h() 元素数组。
- */
-export function storedFormatToHElements(elements: StoredElement[]): h[] {
-  return elements.map(el => {
-    if (el.type === 'text') return h.text(el.content);
-    if (['image', 'video', 'audio', 'file'].includes(el.type)) return h(el.type, { src: el.file });
-    return null;
-  }).filter(Boolean);
-}
-
-/**
  * @description 构建一条用于发送的完整回声洞消息，处理不同存储后端的资源链接。
  * @param cave 回声洞对象。
  * @param config 插件配置。
@@ -29,35 +16,54 @@ export function storedFormatToHElements(elements: StoredElement[]): h[] {
  * @returns 包含 h() 元素和字符串的消息数组。
  */
 export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger): Promise<(string | h)[]> {
-  const caveHElements = storedFormatToHElements(cave.elements);
+  // 递归地将 StoredElement 数组转换为 h() 元素数组，并处理媒体链接
+  async function transformToH(elements: StoredElement[]): Promise<h[]> {
+    return Promise.all(elements.map(async (el): Promise<h> => {
+      if (el.type === 'text') return h.text(el.content);
+      if (el.type === 'at') return h('at', { id: el.content });
 
-  const processedElements = await Promise.all(caveHElements.map(async (element) => {
-    const isMedia = ['image', 'video', 'audio', 'file'].includes(element.type);
-    const fileName = element.attrs.src as string;
-    if (!isMedia || !fileName) return element;
+      if (el.type === 'forward') {
+        try {
+          const children: StoredElement[] = JSON.parse(el.content || '[]');
+          return h('forward', {}, await transformToH(children)); // 递归转换
+        } catch (error) {
+          logger.warn(`解析回声洞（${cave.id}）合并转发内容失败:`, error);
+          return h.text('[合并转发]');
+        }
+      }
 
-    if (config.enableS3 && config.publicUrl) {
-      return h(element.type, { ...element.attrs, src: new URL(fileName, config.publicUrl).href });
-    }
-    if (config.localPath) {
-      return h(element.type, { ...element.attrs, src: `file://${path.join(config.localPath, fileName)}` });
-    }
-    try {
-      const data = await fileManager.readFile(fileName);
-      const mimeType = mimeTypeMap[path.extname(fileName).toLowerCase()] || 'application/octet-stream';
-      return h(element.type, { ...element.attrs, src: `data:${mimeType};base64,${data.toString('base64')}` });
-    } catch (error) {
-      logger.warn(`转换文件 ${fileName} 为 Base64 失败:`, error);
-      return h('p', {}, `[${element.type}]`);
-    }
-  }));
+      // 处理媒体元素
+      if (['image', 'video', 'audio', 'file'].includes(el.type)) {
+        const fileName = el.file;
+        if (!fileName) return h('p', {}, `[${el.type}]`);
+
+        if (config.enableS3 && config.publicUrl) {
+          return h(el.type, { ...el, src: new URL(fileName, config.publicUrl).href });
+        }
+        if (config.localPath) {
+          return h(el.type, { ...el, src: `file://${path.join(config.localPath, fileName)}` });
+        }
+        try {
+          const data = await fileManager.readFile(fileName);
+          const mimeType = mimeTypeMap[path.extname(fileName).toLowerCase()] || 'application/octet-stream';
+          return h(el.type, { ...el, src: `data:${mimeType};base64,${data.toString('base64')}` });
+        } catch (error) {
+          logger.warn(`转换文件 ${fileName} 为 Base64 失败:`, error);
+          return h('p', {}, `[${el.type}]`);
+        }
+      }
+      return null;
+    })).then(hElements => hElements.filter(Boolean));
+  }
+
+  const caveHElements = await transformToH(cave.elements);
 
   const replacements = { id: cave.id.toString(), name: cave.userName };
   const [header, footer] = config.caveFormat.split('|', 2).map(part => part.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim());
 
   const finalMessage: (string | h)[] = [];
   if (header) finalMessage.push(header + '\n');
-  finalMessage.push(...processedElements);
+  finalMessage.push(...caveHElements);
   if (footer) finalMessage.push('\n' + footer);
   return finalMessage;
 }
@@ -173,38 +179,46 @@ export async function processMessageElements(sourceElements: h[], newId: number,
   finalElementsForDb: StoredElement[],
   mediaToSave: { sourceUrl: string, fileName: string }[]
 }> {
-  const finalElementsForDb: StoredElement[] = [];
   const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
   let mediaIndex = 0;
 
-  const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text' };
-  const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
+  async function transform(elements: h[]): Promise<StoredElement[]> {
+    const result: StoredElement[] = [];
+    const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward' };
+    const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
 
-  async function traverse(elements: h[]) {
     for (const el of elements) {
       const type = typeMap[el.type];
       if (!type) {
-        if (el.children) await traverse(el.children);
+        if (el.children) result.push(...await transform(el.children));
         continue;
       }
 
       if (type === 'text' && el.attrs.content?.trim()) {
-        finalElementsForDb.push({ type: 'text', content: el.attrs.content.trim() });
-      } else if (type !== 'text' && el.attrs.src) {
+        result.push({ type: 'text', content: el.attrs.content.trim() });
+      } else if (type === 'at' && el.attrs.id) {
+        result.push({ type: 'at', content: el.attrs.id as string });
+      } else if (type === 'forward' && el.children?.length) {
+        const transformedChildren = await transform(el.children);
+        result.push({ type: 'forward', content: JSON.stringify(transformedChildren) });
+      } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
         if (fileIdentifier.startsWith('http')) {
           const ext = path.extname(el.attrs.file as string || '') || defaultExtMap[type];
-          const fileName = `${newId}_${++mediaIndex}_${session.channelId || 'private'}_${session.userId}${ext}`;
+          const currentMediaIndex = ++mediaIndex;
+          const fileName = `${newId}_${currentMediaIndex}_${session.channelId || 'private'}_${session.userId}${ext}`;
           mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
           fileIdentifier = fileName;
         }
-        finalElementsForDb.push({ type: type as StoredElement['type'], file: fileIdentifier });
+        result.push({ type: type as any, file: fileIdentifier });
+      } else if (el.children) {
+        result.push(...await transform(el.children));
       }
-      if (el.children) await traverse(el.children);
     }
+    return result;
   }
 
-  await traverse(sourceElements);
+  const finalElementsForDb = await transform(sourceElements);
   return { finalElementsForDb, mediaToSave };
 }
 
