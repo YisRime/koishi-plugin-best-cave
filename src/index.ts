@@ -156,7 +156,11 @@ export function apply(ctx: Context, config: Config) {
         const randomId = candidates[Math.floor(Math.random() * candidates.length)].id;
         const [randomCave] = await ctx.database.get('cave', { ...query, id: randomId });
         utils.updateCooldownTimestamp(session, config, lastUsed);
-        return utils.buildCaveMessage(randomCave, config, fileManager, logger);
+
+        const messages = await utils.buildCaveMessage(randomCave, config, fileManager, logger, session.platform);
+        for (const message of messages) {
+          if (message.length > 0) await session.send(h.normalize(message));
+        }
       } catch (error) {
         logger.error('随机获取回声洞失败:', error);
         return '随机获取回声洞失败';
@@ -262,7 +266,11 @@ export function apply(ctx: Context, config: Config) {
         const [targetCave] = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), id });
         if (!targetCave) return `回声洞（${id}）不存在`;
         utils.updateCooldownTimestamp(session, config, lastUsed);
-        return utils.buildCaveMessage(targetCave, config, fileManager, logger);
+
+        const messages = await utils.buildCaveMessage(targetCave, config, fileManager, logger, session.platform);
+        for (const message of messages) {
+          if (message.length > 0) await session.send(h.normalize(message));
+        }
       } catch (error) {
         logger.error(`查看回声洞（${id}）失败:`, error);
         return '查看失败，请稍后再试';
@@ -281,9 +289,13 @@ export function apply(ctx: Context, config: Config) {
         if (!isAuthor && !isAdmin) return '你没有权限删除这条回声洞';
 
         await ctx.database.upsert('cave', [{ id, status: 'delete' }]);
-        const caveMessage = await utils.buildCaveMessage(targetCave, config, fileManager, logger);
+        const caveMessages = await utils.buildCaveMessage(targetCave, config, fileManager, logger, session.platform);
         utils.cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
-        return [`已删除`, ...caveMessage];
+
+        await session.send('已删除');
+        for (const message of caveMessages) {
+          if (message.length > 0) await session.send(h.normalize(message));
+        }
       } catch (error) {
         logger.error(`标记回声洞（${id}）失败:`, error);
         return '删除失败，请稍后再试';

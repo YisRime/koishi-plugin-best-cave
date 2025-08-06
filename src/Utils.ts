@@ -13,9 +13,10 @@ const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image
  * @param config 插件配置。
  * @param fileManager 文件管理器实例。
  * @param logger 日志记录器实例。
- * @returns 包含 h() 元素和字符串的消息数组。
+ * @param platform 目标平台名称 (e.g., 'onebot')。
+ * @returns 包含多条消息的数组，每条消息是一个 (string | h)[] 数组。
  */
-export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger): Promise<(string | h)[]> {
+export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger, platform?: string): Promise<(string | h)[][]> {
   // 递归地将 StoredElement 数组转换为 h() 元素数组，并处理媒体链接
   async function transformToH(elements: StoredElement[]): Promise<h[]> {
     return Promise.all(elements.map(async (el): Promise<h> => {
@@ -66,12 +67,39 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const replacements = { id: cave.id.toString(), name: cave.userName };
   const [header, footer] = config.caveFormat.split('|', 2).map(part => part.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim());
 
-  const finalMessage: (string | h)[] = [];
-  if (header) finalMessage.push(header + '\n');
-  finalMessage.push(...caveHElements);
-  if (footer) finalMessage.push('\n' + footer);
-  return finalMessage;
+  const problematicTypes = ['video', 'audio', 'file', 'forward'];
+  const placeholderMap = { video: '[视频]', audio: '[音频]', file: '[文件]', forward: '[合并转发]' };
+  const containsProblematic = platform === 'onebot' && caveHElements.some(el => problematicTypes.includes(el.type));
+
+  if (!containsProblematic) {
+    const finalMessage: (string | h)[] = [];
+    if (header) finalMessage.push(header + '\n');
+    finalMessage.push(...caveHElements);
+    if (footer) finalMessage.push('\n' + footer);
+    return [finalMessage.length > 0 ? finalMessage : []];
+  }
+
+  // 为 onebot 平台拆分消息
+  const initialMessageContent: (string | h)[] = [];
+  const followUpMessages: (string | h)[][] = [];
+
+  for (const el of caveHElements) {
+    if (problematicTypes.includes(el.type)) {
+      initialMessageContent.push(h.text(placeholderMap[el.type]));
+      followUpMessages.push([el]);
+    } else {
+      initialMessageContent.push(el);
+    }
+  }
+
+  const finalInitialMessage: (string | h)[] = [];
+  if (header) finalInitialMessage.push(header + '\n');
+  finalInitialMessage.push(...initialMessageContent);
+  if (footer) finalInitialMessage.push('\n' + footer);
+
+  return [finalInitialMessage, ...followUpMessages].filter(msg => msg.length > 0);
 }
+
 
 /**
  * @description 清理数据库中标记为 'delete' 状态的回声洞及其关联文件和哈希。

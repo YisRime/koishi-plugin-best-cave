@@ -44,7 +44,13 @@ export class PendManager {
           const [targetCave] = await this.ctx.database.get('cave', { id });
           if (!targetCave) return `回声洞（${id}）不存在`;
           if (targetCave.status !== 'pending') return `回声洞（${id}）无需审核`;
-          return [`待审核`, ...await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger)];
+
+          await session.send('待审核');
+          const caveMessages = await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger, session.platform);
+          for (const message of caveMessages) {
+            if (message.length > 0) await session.send(h.normalize(message));
+          }
+          return;
         }
 
         const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' }, { fields: ['id'] });
@@ -99,8 +105,13 @@ export class PendManager {
       return;
     }
     try {
-      const pendMessage = [`待审核`, ...await buildCaveMessage(cave, this.config, this.fileManager, this.logger)];
-      await this.ctx.broadcast([this.config.adminChannel], h.normalize(pendMessage));
+      const [platform] = this.config.adminChannel.split(':', 1);
+      const caveMessages = await buildCaveMessage(cave, this.config, this.fileManager, this.logger, platform);
+
+      await this.ctx.broadcast([this.config.adminChannel], '待审核');
+      for (const message of caveMessages) {
+        if (message.length > 0) await this.ctx.broadcast([this.config.adminChannel], h.normalize(message));
+      }
     } catch (error) {
       this.logger.error(`发送回声洞（${cave.id}）审核消息失败:`, error);
     }
