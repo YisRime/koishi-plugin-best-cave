@@ -28,7 +28,7 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
     return Promise.all(elements.map(async (el): Promise<h> => {
       if (el.type === 'text') return h.text(el.content);
       if (el.type === 'at') return h('at', { id: el.content });
-
+      if (el.type === 'reply') return h('reply', { id: el.content });
       if (el.type === 'forward') {
         try {
           const forwardNodes: ForwardNode[] = JSON.parse(el.content || '[]');
@@ -198,7 +198,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
 
   async function transform(elements: h[]): Promise<StoredElement[]> {
     const result: StoredElement[] = [];
-    const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward' };
+    const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply' };
     const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
 
     for (const el of elements) {
@@ -213,16 +213,23 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         result.push({ type: 'text', content: el.attrs.content.trim() });
       } else if (type === 'at' && el.attrs.id) {
         result.push({ type: 'at', content: el.attrs.id as string });
+      } else if (type === 'reply' && el.attrs.id) {
+        result.push({ type: 'reply', content: el.attrs.id as string });
       } else if (type === 'forward' && Array.isArray(el.attrs.content)) {
         const forwardNodes: ForwardNode[] = [];
         for (const node of el.attrs.content) {
-          if (!node.message) continue;
+          if (!node.message || !Array.isArray(node.message)) continue;
           const userId = node.sender?.user_id;
           const userName = node.sender?.nickname;
           const contentElements = await transform(h.normalize(node.message));
-          forwardNodes.push({ userId, userName, elements: contentElements });
+          if (contentElements.length > 0) {
+              forwardNodes.push({ userId, userName, elements: contentElements });
+          }
         }
-        result.push({ type: 'forward', content: JSON.stringify(forwardNodes) });
+        if (forwardNodes.length > 0) {
+          result.push({ type: 'forward', content: JSON.stringify(forwardNodes) });
+        }
+
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
         if (fileIdentifier.startsWith('http')) {
