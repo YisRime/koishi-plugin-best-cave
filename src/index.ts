@@ -80,7 +80,6 @@ export interface Config {
   secretAccessKey?: string;
   bucket?: string;
   publicUrl?: string;
-  debug: boolean;
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -108,9 +107,6 @@ export const Config: Schema<Config> = Schema.intersect([
     accessKeyId: Schema.string().description('Access Key ID').role('secret'),
     secretAccessKey: Schema.string().description('Secret Access Key').role('secret'),
   }).description("存储配置"),
-  Schema.object({
-    debug: Schema.boolean().default(false).description('启用调试模式，将在控制台输出详细的操作日志。'),
-  }).description('开发配置'),
 ]);
 
 export function apply(ctx: Context, config: Config) {
@@ -175,17 +171,11 @@ export function apply(ctx: Context, config: Config) {
           if (!reply) return "等待操作超时";
           sourceElements = h.parse(reply);
         }
-
-        if (config.debug) {
-          logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`);
-          logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`);
-        }
-
+        // if (debug) logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`);
+        // if (debug) logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`);
         const newId = await utils.getNextCaveId(ctx, utils.getScopeQuery(session, config, false), reusableIds);
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
-
-        if (config.debug) logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
-
+        // if (debug) logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
         if (finalElementsForDb.length === 0) return "无可添加内容";
         const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
         if (hashManager) {
