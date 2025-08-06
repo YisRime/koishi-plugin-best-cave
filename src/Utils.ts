@@ -7,6 +7,13 @@ import { PendManager } from './PendManager';
 
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
 
+// 定义用于存储合并转发节点的数据结构
+interface ForwardNode {
+  userId: string;
+  userName: string;
+  elements: StoredElement[];
+}
+
 /**
  * @description 构建一条用于发送的完整回声洞消息，处理不同存储后端的资源链接。
  * @param cave 回声洞对象。
@@ -24,8 +31,13 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
 
       if (el.type === 'forward') {
         try {
-          const children: StoredElement[] = JSON.parse(el.content || '[]');
-          return h('forward', {}, await transformToH(children)); // 递归转换
+          const forwardNodes: ForwardNode[] = JSON.parse(el.content || '[]');
+          const messageNodes = await Promise.all(forwardNodes.map(async (node) => {
+            const author = h('author', { id: node.userId, name: node.userName });
+            const content = await transformToH(node.elements);
+            return h('message', {}, [author, ...content]);
+          }));
+          return h('forward', {}, messageNodes);
         } catch (error) {
           logger.warn(`解析回声洞（${cave.id}）合并转发内容失败:`, error);
           return h.text('[合并转发]');
@@ -200,32 +212,23 @@ export async function processMessageElements(sourceElements: h[], newId: number,
       if (type === 'text' && el.attrs.content?.trim()) {
         result.push({ type: 'text', content: el.attrs.content.trim() });
       } else if (type === 'at' && el.attrs.id) {
-        if (config.debug) logger.info(`发现 [at] 元素，ID: "${el.attrs.id}"`);
         result.push({ type: 'at', content: el.attrs.id as string });
       } else if (type === 'forward' && Array.isArray(el.attrs.content)) {
-        if (config.debug) logger.info(`发现 [forward] 元素，开始解析 el.attrs.content...`);
-
-        const allChildElements: StoredElement[] = [];
+        const forwardNodes: ForwardNode[] = [];
         for (const node of el.attrs.content) {
-            const senderInfo = `${node.sender?.nickname || node.sender?.user_id}:`;
-            allChildElements.push({ type: 'text', content: senderInfo });
-
-            if (node.raw_message) {
-              const parsedMessage = h.parse(node.raw_message);
-              const transformedMessage = await transform(parsedMessage);
-              allChildElements.push(...transformedMessage);
-            }
+          if (!node.message) continue;
+          const userId = node.sender?.user_id;
+          const userName = node.sender?.nickname;
+          const contentElements = await transform(h.normalize(node.message));
+          forwardNodes.push({ userId, userName, elements: contentElements });
         }
-        result.push({ type: 'forward', content: JSON.stringify(allChildElements) });
-
+        result.push({ type: 'forward', content: JSON.stringify(forwardNodes) });
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
-        if (config.debug) logger.info(`发现 [${type}] 元素，src: "${fileIdentifier}"`);
         if (fileIdentifier.startsWith('http')) {
           const ext = path.extname(el.attrs.file as string || '') || defaultExtMap[type];
           const currentMediaIndex = ++mediaIndex;
           const fileName = `${newId}_${currentMediaIndex}_${session.channelId || session.guildId}_${session.userId}${ext}`;
-          if (config.debug) logger.info(`[${type}] 是远程文件，已加入待保存列表。文件名: "${fileName}"`);
           mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
           fileIdentifier = fileName;
         }

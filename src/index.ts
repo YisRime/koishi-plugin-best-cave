@@ -174,16 +174,15 @@ export function apply(ctx: Context, config: Config) {
         }
 
         if (config.debug) {
-          logger.info(`获取到的消息内容 (sourceElements): \n${JSON.stringify(sourceElements, null, 2)}`);
-          logger.info(`完整的会话对象 (session): \n${JSON.stringify(session, null, 2)}`);
+          logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`);
+          logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`);
         }
 
         const newId = await utils.getNextCaveId(ctx, utils.getScopeQuery(session, config, false), reusableIds);
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
 
         if (config.debug) {
-          logger.info(`提取后数据库元素(finalElementsForDb): \n${JSON.stringify(finalElementsForDb, null, 2)}`);
-          logger.info(`提取后待存媒体(mediaToSave): \n${JSON.stringify(mediaToSave, null, 2)}`);
+          logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
         }
 
         if (finalElementsForDb.length === 0) return "无可添加内容";
