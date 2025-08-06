@@ -71,6 +71,7 @@ export interface Config {
   secretAccessKey?: string;
   bucket?: string;
   publicUrl?: string;
+  debug: boolean;
 }
 
 export const Config: Schema<Config> = Schema.intersect([
@@ -98,6 +99,9 @@ export const Config: Schema<Config> = Schema.intersect([
     accessKeyId: Schema.string().description('Access Key ID').role('secret'),
     secretAccessKey: Schema.string().description('Secret Access Key').role('secret'),
   }).description("存储配置"),
+  Schema.object({
+    debug: Schema.boolean().default(false).description('启用调试模式，将在控制台输出详细的操作日志。'),
+  }).description('开发配置'),
 ]);
 
 export function apply(ctx: Context, config: Config) {
@@ -154,19 +158,42 @@ export function apply(ctx: Context, config: Config) {
     .usage('添加一条回声洞。可直接发送内容，也可回复或引用消息。')
     .action(async ({ session }, content) => {
       try {
-        let sourceElements = session.quote?.elements;
-        if (!sourceElements && content?.trim()) {
-            sourceElements = h.parse(content);
+        let sourceElements;
+        let sourceOrigin = '';
+
+        // 优先从引用消息获取
+        if (session.quote?.elements) {
+          sourceElements = session.quote.elements;
+          sourceOrigin = '引用(quote)';
         }
-        if (!sourceElements) {
-            await session.send("请在一分钟内发送你要添加的内容");
-            const reply = await session.prompt(60000);
-            if (!reply) return "等待操作超时";
-            sourceElements = h.parse(reply);
+        // 其次从指令后的文本参数获取
+        else if (content?.trim()) {
+          sourceElements = h.parse(content);
+          sourceOrigin = `指令参数(content)`;
+        }
+        // 最后，如果都没有，则等待用户回复
+        else {
+          await session.send("请在一分钟内发送你要添加的内容");
+          const reply = await session.prompt(60000);
+          if (!reply) return "等待操作超时";
+          sourceElements = h.parse(reply);
+          sourceOrigin = `用户回复(prompt)`;
+        }
+
+        if (config.debug) {
+          logger.info(`内容来源: ${sourceOrigin}`);
+          logger.info(`获取到的消息内容 (sourceElements): \n${JSON.stringify(sourceElements, null, 2)}`);
+          logger.info(`完整的会话对象 (session): \n${JSON.stringify(session, null, 2)}`);
         }
 
         const newId = await utils.getNextCaveId(ctx, utils.getScopeQuery(session, config, false), reusableIds);
-        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session);
+        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
+
+        if (config.debug) {
+          logger.info(`提取后数据库元素(finalElementsForDb): \n${JSON.stringify(finalElementsForDb, null, 2)}`);
+          logger.info(`提取后待存媒体(mediaToSave): \n${JSON.stringify(mediaToSave, null, 2)}`);
+        }
+
         if (finalElementsForDb.length === 0) return "无可添加内容";
 
         const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
