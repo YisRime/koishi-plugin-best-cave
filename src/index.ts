@@ -143,24 +143,17 @@ export function apply(ctx: Context, config: Config) {
       if (options.view) return session.execute(`cave.view ${options.view}`);
       if (options.delete) return session.execute(`cave.del ${options.delete}`);
       if (options.list) return session.execute('cave.list');
-
       const cdMessage = utils.checkCooldown(session, config, lastUsed);
       if (cdMessage) return cdMessage;
-
       try {
         const query = utils.getScopeQuery(session, config);
         const candidates = await ctx.database.get('cave', query, { fields: ['id'] });
-        if (!candidates.length) {
-          return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
-        }
+        if (!candidates.length) return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
         const randomId = candidates[Math.floor(Math.random() * candidates.length)].id;
         const [randomCave] = await ctx.database.get('cave', { ...query, id: randomId });
         utils.updateCooldownTimestamp(session, config, lastUsed);
-
         const messages = await utils.buildCaveMessage(randomCave, config, fileManager, logger, session.platform);
-        for (const message of messages) {
-          if (message.length > 0) await session.send(h.normalize(message));
-        }
+        for (const message of messages) if (message.length > 0) await session.send(h.normalize(message));
       } catch (error) {
         logger.error('随机获取回声洞失败:', error);
         return '随机获取回声洞失败';
@@ -172,14 +165,11 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session }, content) => {
       try {
         let sourceElements;
-
         if (session.quote?.elements) {
           sourceElements = session.quote.elements;
-        }
-        else if (content?.trim()) {
+        } else if (content?.trim()) {
           sourceElements = h.parse(content);
-        }
-        else {
+        } else {
           await session.send("请在一分钟内发送你要添加的内容");
           const reply = await session.prompt(60000);
           if (!reply) return "等待操作超时";
@@ -194,39 +184,28 @@ export function apply(ctx: Context, config: Config) {
         const newId = await utils.getNextCaveId(ctx, utils.getScopeQuery(session, config, false), reusableIds);
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
 
-        if (config.debug) {
-          logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
-        }
+        if (config.debug) logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
 
         if (finalElementsForDb.length === 0) return "无可添加内容";
-
         const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
         if (hashManager) {
           const combinedText = finalElementsForDb
-            .filter(el => el.type === 'text' && typeof el.content === 'string')
-            .map(el => el.content)
-            .join(' ');
-
+            .filter(el => el.type === 'text' && typeof el.content === 'string').map(el => el.content).join(' ');
           if (combinedText) {
             const newSimhash = hashManager.generateTextSimhash(combinedText);
             if (newSimhash) {
                 const existingTextHashes = await ctx.database.get('cave_hash', { type: 'simhash' });
-
                 for (const existing of existingTextHashes) {
                   const similarity = hashManager.calculateSimilarity(newSimhash, existing.hash);
-                  if (similarity >= config.textThreshold) {
-                    return `文本与回声洞（${existing.cave}）的相似度（${similarity.toFixed(2)}%）超过阈值`;
-                  }
+                  if (similarity >= config.textThreshold) return `文本与回声洞（${existing.cave}）的相似度（${similarity.toFixed(2)}%）超过阈值`;
                 }
                 textHashesToStore.push({ hash: newSimhash, type: 'simhash' });
             }
           }
         }
-
         const userName = (config.enableName ? await profileManager.getNickname(session.userId) : null) || session.username;
         const hasMedia = mediaToSave.length > 0;
         const initialStatus = hasMedia ? 'preload' : (config.enablePend ? 'pending' : 'active');
-
         const newCave = await ctx.database.create('cave', {
           id: newId,
           elements: finalElementsForDb,
@@ -236,18 +215,12 @@ export function apply(ctx: Context, config: Config) {
           status: initialStatus,
           time: new Date(),
         });
-
         if (hasMedia) {
           utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave, reusableIds, session, hashManager, textHashesToStore);
         } else {
-          if (hashManager && textHashesToStore.length > 0) {
-            await ctx.database.upsert('cave_hash', textHashesToStore.map(h => ({ ...h, cave: newCave.id })));
-          }
-          if (initialStatus === 'pending') {
-            reviewManager.sendForPend(newCave);
-          }
+          if (hashManager && textHashesToStore.length > 0) await ctx.database.upsert('cave_hash', textHashesToStore.map(h => ({ ...h, cave: newCave.id })));
+          if (initialStatus === 'pending') reviewManager.sendForPend(newCave);
         }
-
         return (initialStatus === 'pending' || (initialStatus === 'preload' && config.enablePend))
           ? `提交成功，序号为（${newCave.id}）`
           : `添加成功，序号为（${newCave.id}）`;
@@ -266,11 +239,8 @@ export function apply(ctx: Context, config: Config) {
         const [targetCave] = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), id });
         if (!targetCave) return `回声洞（${id}）不存在`;
         utils.updateCooldownTimestamp(session, config, lastUsed);
-
         const messages = await utils.buildCaveMessage(targetCave, config, fileManager, logger, session.platform);
-        for (const message of messages) {
-          if (message.length > 0) await session.send(h.normalize(message));
-        }
+        for (const message of messages) if (message.length > 0) await session.send(h.normalize(message));
       } catch (error) {
         logger.error(`查看回声洞（${id}）失败:`, error);
         return '查看失败，请稍后再试';
@@ -283,19 +253,13 @@ export function apply(ctx: Context, config: Config) {
       try {
         const [targetCave] = await ctx.database.get('cave', { id, status: 'active' });
         if (!targetCave) return `回声洞（${id}）不存在`;
-
         const isAuthor = targetCave.userId === session.userId;
         const isAdmin = session.channelId === config.adminChannel?.split(':')[1];
         if (!isAuthor && !isAdmin) return '你没有权限删除这条回声洞';
-
         await ctx.database.upsert('cave', [{ id, status: 'delete' }]);
-        const caveMessages = await utils.buildCaveMessage(targetCave, config, fileManager, logger, session.platform);
+        const caveMessages = await utils.buildCaveMessage(targetCave, config, fileManager, logger, session.platform, '已删除');
         utils.cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
-
-        await session.send('已删除');
-        for (const message of caveMessages) {
-          if (message.length > 0) await session.send(h.normalize(message));
-        }
+        for (const message of caveMessages) if (message.length > 0) await session.send(h.normalize(message));
       } catch (error) {
         logger.error(`标记回声洞（${id}）失败:`, error);
         return '删除失败，请稍后再试';
@@ -308,13 +272,10 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session, options }) => {
       if (options.all) {
         const adminChannelId = config.adminChannel?.split(':')[1];
-        if (session.channelId !== adminChannelId) {
-          return '此指令仅限在管理群组中使用';
-        }
+        if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
         try {
           const allCaves = await ctx.database.get('cave', { status: 'active' });
           if (!allCaves.length) return '目前没有任何回声洞投稿。';
-
           const userStats = new Map<string, { userName: string, count: number }>();
           for (const cave of allCaves) {
             const { userId, userName } = cave;
@@ -326,7 +287,6 @@ export function apply(ctx: Context, config: Config) {
               userStats.set(userId, { userName, count: 1 });
             }
           }
-
           const sortedStats = Array.from(userStats.values()).sort((a, b) => b.count - a.count);
           let report = '回声洞投稿数量排行：\n';
           sortedStats.forEach((stat, index) => {
@@ -338,14 +298,11 @@ export function apply(ctx: Context, config: Config) {
           return '查询失败，请稍后再试';
         }
       }
-
       const targetUserId = options.user || session.userId;
       const isQueryingSelf = !options.user;
-
       const query = { ...utils.getScopeQuery(session, config), userId: targetUserId };
       const userCaves = await ctx.database.get('cave', query);
       if (!userCaves.length) return isQueryingSelf ? '你还没有投稿过回声洞' : `用户 ${targetUserId} 还没有投稿过回声洞`;
-
       const caveIds = userCaves.map(c => c.id).sort((a, b) => a - b).join('|');
       const userName = userCaves.sort((a,b) => b.time.getTime() - a.time.getTime())[0].userName;
       return `${isQueryingSelf ? '你' : userName}已投稿 ${userCaves.length} 条回声洞，序号为：\n${caveIds}`;

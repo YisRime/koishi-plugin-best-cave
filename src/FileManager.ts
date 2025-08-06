@@ -46,9 +46,7 @@ export class FileManager {
    * @returns 异步操作的结果。
    */
   private async withLock<T>(fullPath: string, operation: () => Promise<T>): Promise<T> {
-    while (this.locks.has(fullPath)) {
-      await this.locks.get(fullPath);
-    }
+    while (this.locks.has(fullPath)) await this.locks.get(fullPath);
     const promise = operation().finally(() => {
       this.locks.delete(fullPath);
     });
@@ -65,10 +63,8 @@ export class FileManager {
   public async saveFile(fileName: string, data: Buffer): Promise<string> {
     if (this.s3Client) {
       const command = new PutObjectCommand({
-        Bucket: this.s3Bucket,
-        Key: fileName,
-        Body: data,
-        ACL: 'public-read',
+        Bucket: this.s3Bucket, Key: fileName,
+        Body: data, ACL: 'public-read',
       });
       await this.s3Client.send(command);
     } else {

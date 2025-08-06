@@ -1,6 +1,5 @@
 import { Context, Logger } from 'koishi';
 import { FileManager } from './FileManager';
-import { HashManager } from './HashManager';
 import { CaveObject, Config } from './index';
 
 /**
@@ -33,9 +32,7 @@ export class DataManager {
    */
   public registerCommands(cave) {
     const requireAdmin = (action: () => Promise<string>) => async ({ session }) => {
-      if (session.channelId !== this.config.adminChannel?.split(':')[1]) {
-        return '此指令仅限在管理群组中使用';
-      }
+      if (session.channelId !== this.config.adminChannel?.split(':')[1]) return '此指令仅限在管理群组中使用';
       try {
         await session.send('正在处理，请稍候...');
         return await action();
@@ -68,28 +65,19 @@ export class DataManager {
   public async importData(): Promise<string> {
     const fileName = 'cave_import.json';
     let importedCaves: PortableCaveObject[];
-
     try {
       const fileContent = await this.fileManager.readFile(fileName);
       importedCaves = JSON.parse(fileContent.toString('utf-8'));
-      if (!Array.isArray(importedCaves) || !importedCaves.length) {
-        throw new Error('导入文件格式无效或为空');
-      }
+      if (!Array.isArray(importedCaves) || !importedCaves.length) throw new Error('导入文件格式无效或为空');
     } catch (error) {
       throw new Error(`读取导入文件失败: ${error.message}`);
     }
-
     const [lastCave] = await this.ctx.database.get('cave', {}, { sort: { id: 'desc' }, limit: 1 });
     let startId = (lastCave?.id || 0) + 1;
-
     const newCavesToInsert: CaveObject[] = importedCaves.map((cave, index) => ({
-      ...cave,
-      id: startId + index,
-      status: 'active',
+      ...cave, id: startId + index, status: 'active',
     }));
-
     await this.ctx.database.upsert('cave', newCavesToInsert);
-
     return `成功导入 ${newCavesToInsert.length} 条数据`;
   }
 }

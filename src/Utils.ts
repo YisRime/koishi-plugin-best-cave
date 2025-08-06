@@ -14,9 +14,10 @@ const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image
  * @param fileManager 文件管理器实例。
  * @param logger 日志记录器实例。
  * @param platform 目标平台名称 (e.g., 'onebot')。
+ * @param prefix 可选的消息前缀 (e.g., '已删除', '待审核')。
  * @returns 包含多条消息的数组，每条消息是一个 (string | h)[] 数组。
  */
-export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger, platform?: string): Promise<(string | h)[][]> {
+export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger, platform?: string, prefix?: string): Promise<(string | h)[][]> {
   // 递归地将 StoredElement 数组转换为 h() 元素数组，并处理媒体链接
   async function transformToH(elements: StoredElement[]): Promise<h[]> {
     return Promise.all(elements.map(async (el): Promise<h> => {
@@ -37,18 +38,12 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
           return h.text('[合并转发]');
         }
       }
-
       // 处理媒体元素
       if (['image', 'video', 'audio', 'file'].includes(el.type)) {
         const fileName = el.file;
         if (!fileName) return h('p', {}, `[${el.type}]`);
-
-        if (config.enableS3 && config.publicUrl) {
-          return h(el.type, { ...el, src: new URL(fileName, config.publicUrl).href });
-        }
-        if (config.localPath) {
-          return h(el.type, { ...el, src: `file://${path.join(config.localPath, fileName)}` });
-        }
+        if (config.enableS3 && config.publicUrl) return h(el.type, { ...el, src: new URL(fileName, config.publicUrl).href });
+        if (config.localPath) return h(el.type, { ...el, src: `file://${path.join(config.localPath, fileName)}` });
         try {
           const data = await fileManager.readFile(fileName);
           const mimeType = mimeTypeMap[path.extname(fileName).toLowerCase()] || 'application/octet-stream';
@@ -61,16 +56,15 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
       return null;
     })).then(hElements => hElements.filter(Boolean));
   }
-
   const caveHElements = await transformToH(cave.elements);
-
   const replacements = { id: cave.id.toString(), name: cave.userName };
-  const [header, footer] = config.caveFormat.split('|', 2).map(part => part.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim());
-
+  const [rawHeader, rawFooter] = config.caveFormat.split('|', 2);
+  let header = rawHeader ? rawHeader.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim() : '';
+  if (prefix) header = `${prefix}${header}`;
+  const footer = rawFooter ? rawFooter.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim() : '';
   const problematicTypes = ['video', 'audio', 'file', 'forward'];
   const placeholderMap = { video: '[视频]', audio: '[音频]', file: '[文件]', forward: '[合并转发]' };
   const containsProblematic = platform === 'onebot' && caveHElements.some(el => problematicTypes.includes(el.type));
-
   if (!containsProblematic) {
     const finalMessage: (string | h)[] = [];
     if (header) finalMessage.push(header + '\n');
@@ -78,11 +72,8 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
     if (footer) finalMessage.push('\n' + footer);
     return [finalMessage.length > 0 ? finalMessage : []];
   }
-
-  // 为 onebot 平台拆分消息
   const initialMessageContent: (string | h)[] = [];
   const followUpMessages: (string | h)[][] = [];
-
   for (const el of caveHElements) {
     if (problematicTypes.includes(el.type)) {
       initialMessageContent.push(h.text(placeholderMap[el.type]));
@@ -91,12 +82,10 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
       initialMessageContent.push(el);
     }
   }
-
   const finalInitialMessage: (string | h)[] = [];
   if (header) finalInitialMessage.push(header + '\n');
   finalInitialMessage.push(...initialMessageContent);
   if (footer) finalInitialMessage.push('\n' + footer);
-
   return [finalInitialMessage, ...followUpMessages].filter(msg => msg.length > 0);
 }
 
@@ -112,15 +101,10 @@ export async function cleanupPendingDeletions(ctx: Context, fileManager: FileMan
   try {
     const cavesToDelete = await ctx.database.get('cave', { status: 'delete' });
     if (!cavesToDelete.length) return;
-
     const idsToDelete = cavesToDelete.map(c => c.id);
-    for (const cave of cavesToDelete) {
-      await Promise.all(cave.elements.filter(el => el.file).map(el => fileManager.deleteFile(el.file)));
-    }
-
+    for (const cave of cavesToDelete) await Promise.all(cave.elements.filter(el => el.file).map(el => fileManager.deleteFile(el.file)));
     reusableIds.delete(0);
     idsToDelete.forEach(id => reusableIds.add(id));
-
     await ctx.database.remove('cave', { id: { $in: idsToDelete } });
     await ctx.database.remove('cave_hash', { cave: { $in: idsToDelete } });
   } catch (error) {
@@ -154,7 +138,6 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
       return id;
     }
   }
-
   if (reusableIds.has(0)) {
     reusableIds.delete(0);
     const [lastCave] = await ctx.database.get('cave', query, { sort: { id: 'desc' }, limit: 1 });
@@ -162,15 +145,11 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
     reusableIds.add(0);
     return newId;
   }
-
   const allCaveIds = (await ctx.database.get('cave', query, { fields: ['id'] })).map(c => c.id);
   const existingIds = new Set(allCaveIds);
   let newId = 1;
   while (existingIds.has(newId)) newId++;
-
-  if (existingIds.size === (allCaveIds.length > 0 ? Math.max(...allCaveIds) : 0)) {
-    reusableIds.add(0);
-  }
+  if (existingIds.size === (allCaveIds.length > 0 ? Math.max(...allCaveIds) : 0)) reusableIds.add(0);
   return newId;
 }
 
@@ -180,15 +159,11 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
  */
 export function checkCooldown(session: Session, config: Config, lastUsed: Map<string, number>): string | null {
   const adminChannelId = config.adminChannel?.split(':')[1];
-  if (adminChannelId && session.channelId === adminChannelId) {
-    return null;
-  }
+  if (adminChannelId && session.channelId === adminChannelId) return null;
   if (config.coolDown <= 0 || !session.channelId) return null;
   const lastTime = lastUsed.get(session.channelId) || 0;
   const remainingTime = (lastTime + config.coolDown * 1000) - Date.now();
-  if (remainingTime > 0) {
-    return `指令冷却中，请在 ${Math.ceil(remainingTime / 1000)} 秒后重试`;
-  }
+  if (remainingTime > 0) return `指令冷却中，请在 ${Math.ceil(remainingTime / 1000)} 秒后重试`;
   return null;
 }
 
@@ -196,9 +171,7 @@ export function checkCooldown(session: Session, config: Config, lastUsed: Map<st
  * @description 更新指定频道的指令使用时间戳。
  */
 export function updateCooldownTimestamp(session: Session, config: Config, lastUsed: Map<string, number>) {
-  if (config.coolDown > 0 && session.channelId) {
-    lastUsed.set(session.channelId, Date.now());
-  }
+  if (config.coolDown > 0 && session.channelId) lastUsed.set(session.channelId, Date.now());
 }
 
 /**
@@ -210,26 +183,19 @@ export function updateCooldownTimestamp(session: Session, config: Config, lastUs
  * @param logger 日志实例。
  * @returns 包含数据库元素和待保存媒体列表的对象。
  */
-export async function processMessageElements(sourceElements: h[], newId: number, session: Session, config: Config, logger: Logger): Promise<{
-  finalElementsForDb: StoredElement[],
-  mediaToSave: { sourceUrl: string, fileName: string }[]
-}> {
+export async function processMessageElements(sourceElements: h[], newId: number, session: Session, config: Config, logger: Logger): Promise<{ finalElementsForDb: StoredElement[], mediaToSave: { sourceUrl: string, fileName: string }[] }> {
   const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
   let mediaIndex = 0;
-
   async function transform(elements: h[]): Promise<StoredElement[]> {
     const result: StoredElement[] = [];
     const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply' };
     const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
-
     for (const el of elements) {
       const type = typeMap[el.type];
-
       if (!type) {
         if (el.children) result.push(...await transform(el.children));
         continue;
       }
-
       if (type === 'text' && el.attrs.content?.trim()) {
         result.push({ type: 'text', content: el.attrs.content.trim() });
       } else if (type === 'at' && el.attrs.id) {
@@ -251,14 +217,9 @@ export async function processMessageElements(sourceElements: h[], newId: number,
             return h(type, attrs);
           });
           const contentElements = await transform(elementsToProcess);
-          if (contentElements.length > 0) {
-              forwardNodes.push({ userId, userName, elements: contentElements });
-          }
+          if (contentElements.length > 0) forwardNodes.push({ userId, userName, elements: contentElements });
         }
-        if (forwardNodes.length > 0) {
-          result.push({ type: 'forward', content: forwardNodes });
-        }
-
+        if (forwardNodes.length > 0) result.push({ type: 'forward', content: forwardNodes });
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
         if (fileIdentifier.startsWith('http')) {
@@ -273,11 +234,24 @@ export async function processMessageElements(sourceElements: h[], newId: number,
     }
     return result;
   }
-
   const finalElementsForDb = await transform(sourceElements);
   return { finalElementsForDb, mediaToSave };
 }
 
+/**
+ * @description 异步处理文件上传、查重和状态更新的后台任务。
+ * @param ctx - Koishi 上下文。
+ * @param config - 插件配置。
+ * @param fileManager - FileManager 实例，用于保存文件。
+ * @param logger - 日志记录器实例。
+ * @param reviewManager - ReviewManager 实例，用于提交审核。
+ * @param cave - 刚刚在数据库中创建的 `preload` 状态的回声洞对象。
+ * @param mediaToSave - 需要下载和处理的媒体文件列表。
+ * @param reusableIds - 可复用 ID 的内存缓存。
+ * @param session - 触发此操作的用户会话，用于发送反馈。
+ * @param hashManager - HashManager 实例，如果启用则用于哈希计算和比较。
+ * @param textHashesToStore - 已预先计算好的、待存入数据库的文本哈希对象数组。
+ */
 export async function handleFileUploads(
   ctx: Context, config: Config, fileManager: FileManager, logger: Logger,
   reviewManager: PendManager, cave: CaveObject, mediaToToSave: { sourceUrl: string, fileName: string }[],
@@ -286,17 +260,13 @@ export async function handleFileUploads(
   try {
     const downloadedMedia: { fileName: string, buffer: Buffer }[] = [];
     const imageHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
-
     const allExistingImageHashes = hashManager ? await ctx.database.get('cave_hash', { type: { $ne: 'simhash' } }) : [];
     const existingGlobalHashes = allExistingImageHashes.filter(h => h.type === 'phash_g');
-
     for (const media of mediaToToSave) {
       const buffer = Buffer.from(await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 }));
       downloadedMedia.push({ fileName: media.fileName, buffer });
-
       if (hashManager && ['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(media.fileName).toLowerCase())) {
         const { globalHash, quadrantHashes } = await hashManager.generateAllImageHashes(buffer);
-
         for (const existing of existingGlobalHashes) {
           const similarity = hashManager.calculateSimilarity(globalHash, existing.hash);
           if (similarity >= config.imageThreshold) {
@@ -306,7 +276,6 @@ export async function handleFileUploads(
             return;
           }
         }
-
         imageHashesToStore.push({ hash: globalHash, type: 'phash_g' });
         imageHashesToStore.push({ hash: quadrantHashes.q1, type: 'phash_q1' });
         imageHashesToStore.push({ hash: quadrantHashes.q2, type: 'phash_q2' });
@@ -314,19 +283,13 @@ export async function handleFileUploads(
         imageHashesToStore.push({ hash: quadrantHashes.q4, type: 'phash_q4' });
       }
     }
-
     await Promise.all(downloadedMedia.map(item => fileManager.saveFile(item.fileName, item.buffer)));
-
     const finalStatus = config.enablePend ? 'pending' : 'active';
     await ctx.database.upsert('cave', [{ id: cave.id, status: finalStatus }]);
-
     if (hashManager) {
       const allHashesToInsert = [...textHashesToStore, ...imageHashesToStore].map(h => ({ ...h, cave: cave.id }));
-      if (allHashesToInsert.length > 0) {
-        await ctx.database.upsert('cave_hash', allHashesToInsert);
-      }
+      if (allHashesToInsert.length > 0) await ctx.database.upsert('cave_hash', allHashesToInsert);
     }
-
     if (finalStatus === 'pending' && reviewManager) {
       const [finalCave] = await ctx.database.get('cave', { id: cave.id });
       if (finalCave) reviewManager.sendForPend(finalCave);

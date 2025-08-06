@@ -29,67 +29,50 @@ export class PendManager {
    */
   public registerCommands(cave) {
     const requireAdmin = (session) => {
-      if (session.channelId !== this.config.adminChannel?.split(':')[1]) {
-        return '此指令仅限在管理群组中使用';
-      }
+      if (session.channelId !== this.config.adminChannel?.split(':')[1]) return '此指令仅限在管理群组中使用';
       return null;
     };
-
     const pend = cave.subcommand('.pend [id:posint]', '审核回声洞')
       .action(async ({ session }, id) => {
         const adminError = requireAdmin(session);
         if (adminError) return adminError;
-
         if (id) {
           const [targetCave] = await this.ctx.database.get('cave', { id });
           if (!targetCave) return `回声洞（${id}）不存在`;
           if (targetCave.status !== 'pending') return `回声洞（${id}）无需审核`;
-
-          await session.send('待审核');
-          const caveMessages = await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger, session.platform);
-          for (const message of caveMessages) {
-            if (message.length > 0) await session.send(h.normalize(message));
-          }
+          const caveMessages = await buildCaveMessage(targetCave, this.config, this.fileManager, this.logger, session.platform, '待审核');
+          for (const message of caveMessages) if (message.length > 0) await session.send(h.normalize(message));
           return;
         }
-
         const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' }, { fields: ['id'] });
         if (!pendingCaves.length) return '当前没有需要审核的回声洞';
         return `当前共有 ${pendingCaves.length} 条待审核回声洞，序号为：\n${pendingCaves.map(c => c.id).join('|')}`;
       });
-
     const createPendAction = (actionType: 'approve' | 'reject') => async ({ session }, id?: number) => {
       const adminError = requireAdmin(session);
       if (adminError) return adminError;
-
       try {
         const targetStatus = actionType === 'approve' ? 'active' : 'delete';
         const actionText = actionType === 'approve' ? '通过' : '拒绝';
-
         // 批量处理
         if (!id) {
           const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' });
           if (!pendingCaves.length) return `当前没有需要${actionText}的回声洞`;
-
           await this.ctx.database.upsert('cave', pendingCaves.map(c => ({ id: c.id, status: targetStatus })));
           if (targetStatus === 'delete') cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
           return `已批量${actionText} ${pendingCaves.length} 条回声洞`;
         }
-
         // 单个处理
         const [cave] = await this.ctx.database.get('cave', { id, status: 'pending' });
         if (!cave) return `回声洞（${id}）无需审核`;
-
         await this.ctx.database.upsert('cave', [{ id, status: targetStatus }]);
         if (targetStatus === 'delete') cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
         return `回声洞（${id}）已${actionText}`;
-
       } catch (error) {
         this.logger.error(`审核操作失败:`, error);
         return `操作失败: ${error.message}`;
       }
     };
-
     pend.subcommand('.Y [id:posint]', '通过审核').action(createPendAction('approve'));
     pend.subcommand('.N [id:posint]', '拒绝审核').action(createPendAction('reject'));
   }
@@ -106,12 +89,8 @@ export class PendManager {
     }
     try {
       const [platform] = this.config.adminChannel.split(':', 1);
-      const caveMessages = await buildCaveMessage(cave, this.config, this.fileManager, this.logger, platform);
-
-      await this.ctx.broadcast([this.config.adminChannel], '待审核');
-      for (const message of caveMessages) {
-        if (message.length > 0) await this.ctx.broadcast([this.config.adminChannel], h.normalize(message));
-      }
+      const caveMessages = await buildCaveMessage(cave, this.config, this.fileManager, this.logger, platform, '待审核');
+      for (const message of caveMessages) if (message.length > 0) await this.ctx.broadcast([this.config.adminChannel], h.normalize(message));
     } catch (error) {
       this.logger.error(`发送回声洞（${cave.id}）审核消息失败:`, error);
     }
