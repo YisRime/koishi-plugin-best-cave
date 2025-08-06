@@ -18,7 +18,7 @@ const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image
  * @returns 包含多条消息的数组，每条消息是一个 (string | h)[] 数组。
  */
 export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger, platform?: string, prefix?: string): Promise<(string | h)[][]> {
-  // 递归地将 StoredElement 数组转换为 h() 元素数组，并处理媒体链接
+  // 递归地将 StoredElement 数组转换为 h() 元素数组
   async function transformToH(elements: StoredElement[]): Promise<h[]> {
     return Promise.all(elements.map(async (el): Promise<h> => {
       if (el.type === 'text') return h.text(el.content as string);
@@ -32,7 +32,7 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
             const content = await transformToH(node.elements);
             return h('message', {}, [author, ...content]);
           }));
-          return h('forward', {}, messageNodes);
+          return h('message', { forward: true }, messageNodes);
         } catch (error) {
           logger.warn(`解析回声洞（${cave.id}）合并转发内容失败:`, error);
           return h.text('[合并转发]');
@@ -64,7 +64,7 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const footer = rawFooter ? rawFooter.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim() : '';
   const problematicTypes = ['video', 'audio', 'file', 'forward'];
   const placeholderMap = { video: '[视频]', audio: '[音频]', file: '[文件]', forward: '[合并转发]' };
-  const containsProblematic = platform === 'onebot' && caveHElements.some(el => problematicTypes.includes(el.type));
+  const containsProblematic = platform === 'onebot' && caveHElements.some(el => problematicTypes.includes(el.type) || (el.type === 'message' && el.attrs.forward));
   if (!containsProblematic) {
     const finalMessage: (string | h)[] = [];
     if (header) finalMessage.push(header + '\n');
@@ -75,8 +75,8 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const initialMessageContent: (string | h)[] = [];
   const followUpMessages: (string | h)[][] = [];
   for (const el of caveHElements) {
-    if (problematicTypes.includes(el.type)) {
-      initialMessageContent.push(h.text(placeholderMap[el.type]));
+    if (problematicTypes.includes(el.type) || (el.type === 'message' && el.attrs.forward)) {
+      initialMessageContent.push(h.text(placeholderMap['forward']));
       followUpMessages.push([el]);
     } else {
       initialMessageContent.push(el);
