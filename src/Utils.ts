@@ -221,7 +221,26 @@ export async function processMessageElements(sourceElements: h[], newId: number,
           if (!node.message || !Array.isArray(node.message)) continue;
           const userId = node.sender?.user_id;
           const userName = node.sender?.nickname;
-          const contentElements = await transform(h.normalize(node.message));
+          const elementsToProcess = node.message.map(segment => {
+            const { type, data } = segment;
+            const attrs = { ...data };
+
+            if (type === 'text' && typeof data.text !== 'undefined') {
+              attrs.content = data.text;
+              delete attrs.text;
+            }
+            if (type === 'at' && typeof data.qq !== 'undefined') {
+              attrs.id = data.qq;
+              delete attrs.qq;
+            }
+            if (['image', 'video', 'audio'].includes(type) && typeof data.url !== 'undefined') {
+              attrs.src = data.url;
+              delete attrs.url;
+            }
+            return h(type, attrs);
+          });
+
+          const contentElements = await transform(elementsToProcess);
           if (contentElements.length > 0) {
               forwardNodes.push({ userId, userName, elements: contentElements });
           }
