@@ -121,7 +121,7 @@ export function apply(ctx: Context, config: Config) {
   const profileManager = config.enableName ? new NameManager(ctx) : null;
   const reviewManager = config.enablePend ? new PendManager(ctx, config, fileManager, logger, reusableIds) : null;
   const hashManager = config.enableSimilarity ? new HashManager(ctx, config, logger, fileManager) : null;
-  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger, hashManager) : null;
+  const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger) : null;
 
   const cave = ctx.command('cave', '回声洞')
     .option('add', '-a <content:text> 添加回声洞')
@@ -159,29 +159,21 @@ export function apply(ctx: Context, config: Config) {
     .action(async ({ session }, content) => {
       try {
         let sourceElements;
-        let sourceOrigin = '';
 
-        // 优先从引用消息获取
         if (session.quote?.elements) {
           sourceElements = session.quote.elements;
-          sourceOrigin = '引用(quote)';
         }
-        // 其次从指令后的文本参数获取
         else if (content?.trim()) {
           sourceElements = h.parse(content);
-          sourceOrigin = `指令参数(content)`;
         }
-        // 最后，如果都没有，则等待用户回复
         else {
           await session.send("请在一分钟内发送你要添加的内容");
           const reply = await session.prompt(60000);
           if (!reply) return "等待操作超时";
           sourceElements = h.parse(reply);
-          sourceOrigin = `用户回复(prompt)`;
         }
 
         if (config.debug) {
-          logger.info(`内容来源: ${sourceOrigin}`);
           logger.info(`获取到的消息内容 (sourceElements): \n${JSON.stringify(sourceElements, null, 2)}`);
           logger.info(`完整的会话对象 (session): \n${JSON.stringify(session, null, 2)}`);
         }

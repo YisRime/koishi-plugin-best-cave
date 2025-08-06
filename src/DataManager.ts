@@ -19,14 +19,12 @@ export class DataManager {
    * @param config 插件配置。
    * @param fileManager 文件管理器实例。
    * @param logger 日志记录器实例。
-   * @param hashManager 哈希管理器实例，用于增量更新哈希。
    */
   constructor(
     private ctx: Context,
     private config: Config,
     private fileManager: FileManager,
     private logger: Logger,
-    private hashManager: HashManager | null,
   ) {}
 
   /**

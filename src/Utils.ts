@@ -191,7 +191,6 @@ export async function processMessageElements(sourceElements: h[], newId: number,
 
     for (const el of elements) {
       const type = typeMap[el.type];
-      if (config.debug) logger.info(`正在处理元素 <${el.type}>, 映射类型: ${type || '无'}`);
 
       if (!type) {
         if (el.children) result.push(...await transform(el.children));
@@ -199,31 +198,38 @@ export async function processMessageElements(sourceElements: h[], newId: number,
       }
 
       if (type === 'text' && el.attrs.content?.trim()) {
-        const content = el.attrs.content.trim();
-        if (config.debug) logger.info(`发现 [text] 元素，内容: "${content}"`);
-        result.push({ type: 'text', content });
+        result.push({ type: 'text', content: el.attrs.content.trim() });
       } else if (type === 'at' && el.attrs.id) {
         if (config.debug) logger.info(`发现 [at] 元素，ID: "${el.attrs.id}"`);
         result.push({ type: 'at', content: el.attrs.id as string });
-      } else if (type === 'forward' && el.children?.length) {
-        if (config.debug) logger.info(`发现 [forward] 元素，开始递归解析子元素...`);
-        const transformedChildren = await transform(el.children);
-        result.push({ type: 'forward', content: JSON.stringify(transformedChildren) });
+      } else if (type === 'forward' && Array.isArray(el.attrs.content)) {
+        if (config.debug) logger.info(`发现 [forward] 元素，开始解析 el.attrs.content...`);
+
+        const allChildElements: StoredElement[] = [];
+        for (const node of el.attrs.content) {
+            const senderInfo = `${node.sender?.nickname || node.sender?.user_id}:`;
+            allChildElements.push({ type: 'text', content: senderInfo });
+
+            if (node.message) {
+              const parsedMessage = h.parse(node.message);
+              const transformedMessage = await transform(parsedMessage);
+              allChildElements.push(...transformedMessage);
+            }
+        }
+        result.push({ type: 'forward', content: JSON.stringify(allChildElements) });
+
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
         if (config.debug) logger.info(`发现 [${type}] 元素，src: "${fileIdentifier}"`);
         if (fileIdentifier.startsWith('http')) {
           const ext = path.extname(el.attrs.file as string || '') || defaultExtMap[type];
           const currentMediaIndex = ++mediaIndex;
-          const fileName = `${newId}_${currentMediaIndex}_${session.channelId || 'private'}_${session.userId}${ext}`;
-          if (config.debug) logger.info(`[${type}] 是远程文件，文件名: "${fileName}"`);
+          const fileName = `${newId}_${currentMediaIndex}_${session.channelId || session.guildId}_${session.userId}${ext}`;
+          if (config.debug) logger.info(`[${type}] 是远程文件，已加入待保存列表。文件名: "${fileName}"`);
           mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
           fileIdentifier = fileName;
         }
         result.push({ type: type as any, file: fileIdentifier });
-      } else if (el.children) {
-        if (config.debug) logger.info(`元素 <${el.type}> 无直接内容，递归其子元素...`);
-        result.push(...await transform(el.children));
       }
     }
     return result;
