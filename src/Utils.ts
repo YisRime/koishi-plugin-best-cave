@@ -283,7 +283,8 @@ export async function handleFileUploads(
       }
     }
     await Promise.all(downloadedMedia.map(item => fileManager.saveFile(item.fileName, item.buffer)));
-    const finalStatus = config.enablePend ? 'pending' : 'active';
+    const needsReview = config.enablePend && session.channelId !== config.adminChannel?.split(':')[1];
+    const finalStatus = needsReview ? 'pending' : 'active';
     await ctx.database.upsert('cave', [{ id: cave.id, status: finalStatus }]);
     if (hashManager) {
       const allHashesToInsert = [...textHashesToStore, ...imageHashesToStore].map(h => ({ ...h, cave: cave.id }));

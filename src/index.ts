@@ -195,7 +195,8 @@ export function apply(ctx: Context, config: Config) {
         }
         const userName = (config.enableName ? await profileManager.getNickname(session.userId) : null) || session.username;
         const hasMedia = mediaToSave.length > 0;
-        const initialStatus = hasMedia ? 'preload' : (config.enablePend ? 'pending' : 'active');
+        const needsReview = config.enablePend && session.channelId !== config.adminChannel?.split(':')[1];
+        const initialStatus = hasMedia ? 'preload' : (needsReview ? 'pending' : 'active');
         const newCave = await ctx.database.create('cave', {
           id: newId,
           elements: finalElementsForDb,
