@@ -1,18 +1,11 @@
 import { Context, h, Logger, Session } from 'koishi';
 import * as path from 'path';
-import { CaveObject, Config, StoredElement } from './index';
+import { CaveObject, Config, StoredElement, ForwardNode } from './index';
 import { FileManager } from './FileManager';
 import { HashManager, CaveHashObject } from './HashManager';
 import { PendManager } from './PendManager';
 
 const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.mp4': 'video/mp4', '.mp3': 'audio/mpeg', '.webp': 'image/webp' };
-
-// 定义用于存储合并转发节点的数据结构
-interface ForwardNode {
-  userId: string;
-  userName: string;
-  elements: StoredElement[];
-}
 
 /**
  * @description 构建一条用于发送的完整回声洞消息，处理不同存储后端的资源链接。
@@ -26,12 +19,12 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   // 递归地将 StoredElement 数组转换为 h() 元素数组，并处理媒体链接
   async function transformToH(elements: StoredElement[]): Promise<h[]> {
     return Promise.all(elements.map(async (el): Promise<h> => {
-      if (el.type === 'text') return h.text(el.content);
-      if (el.type === 'at') return h('at', { id: el.content });
-      if (el.type === 'reply') return h('reply', { id: el.content });
+      if (el.type === 'text') return h.text(el.content as string);
+      if (el.type === 'at') return h('at', { id: el.content as string });
+      if (el.type === 'reply') return h('reply', { id: el.content as string });
       if (el.type === 'forward') {
         try {
-          const forwardNodes: ForwardNode[] = JSON.parse(el.content || '[]');
+          const forwardNodes: ForwardNode[] = Array.isArray(el.content) ? el.content : [];
           const messageNodes = await Promise.all(forwardNodes.map(async (node) => {
             const author = h('author', { id: node.userId, name: node.userName });
             const content = await transformToH(node.elements);
@@ -224,29 +217,18 @@ export async function processMessageElements(sourceElements: h[], newId: number,
           const elementsToProcess = node.message.map(segment => {
             const { type, data } = segment;
             const attrs = { ...data };
-
-            if (type === 'text' && typeof data.text !== 'undefined') {
-              attrs.content = data.text;
-              delete attrs.text;
-            }
-            if (type === 'at' && typeof data.qq !== 'undefined') {
-              attrs.id = data.qq;
-              delete attrs.qq;
-            }
-            if (['image', 'video', 'audio'].includes(type) && typeof data.url !== 'undefined') {
-              attrs.src = data.url;
-              delete attrs.url;
-            }
+            if (type === 'text' && typeof data.text !== 'undefined') { attrs.content = data.text; delete attrs.text; }
+            if (type === 'at' && typeof data.qq !== 'undefined') { attrs.id = data.qq; delete attrs.qq; }
+            if (['image', 'video', 'audio'].includes(type) && typeof data.url !== 'undefined') { attrs.src = data.url; delete attrs.url; }
             return h(type, attrs);
           });
-
           const contentElements = await transform(elementsToProcess);
           if (contentElements.length > 0) {
               forwardNodes.push({ userId, userName, elements: contentElements });
           }
         }
         if (forwardNodes.length > 0) {
-          result.push({ type: 'forward', content: JSON.stringify(forwardNodes) });
+          result.push({ type: 'forward', content: forwardNodes });
         }
 
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {

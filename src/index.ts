@@ -24,12 +24,21 @@ export const usage = `
 const logger = new Logger('best-cave');
 
 /**
+ * @description 存储在合并转发中的单个节点的数据结构。
+ */
+export interface ForwardNode {
+  userId: string;
+  userName: string;
+  elements: StoredElement[];
+}
+
+/**
  * @description 存储在数据库中的单个消息元素。
  */
 export interface StoredElement {
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'at' | 'forward' | 'reply';
-  content?: string; // text content, atId, replyId, or JSON.stringified for forward
-  file?: string;    // for media
+  content?: string | ForwardNode[];
+  file?: string;
 }
 
 /**
@@ -190,7 +199,7 @@ export function apply(ctx: Context, config: Config) {
         const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
         if (hashManager) {
           const combinedText = finalElementsForDb
-            .filter(el => el.type === 'text' && el.content)
+            .filter(el => el.type === 'text' && typeof el.content === 'string')
             .map(el => el.content)
             .join(' ');
 
