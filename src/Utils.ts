@@ -182,7 +182,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
   const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
   let mediaIndex = 0;
 
-  async function transform(elements: h[], logger: Logger = new Logger('best-cave:transform')): Promise<StoredElement[]> {
+  async function transform(elements: h[]): Promise<StoredElement[]> {
     const result: StoredElement[] = [];
     const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward' };
     const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
@@ -190,7 +190,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
     for (const el of elements) {
       const type = typeMap[el.type];
       if (!type) {
-        if (el.children) result.push(...await transform(el.children, logger));
+        if (el.children) result.push(...await transform(el.children));
         continue;
       }
 
@@ -198,39 +198,9 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         result.push({ type: 'text', content: el.attrs.content.trim() });
       } else if (type === 'at' && el.attrs.id) {
         result.push({ type: 'at', content: el.attrs.id as string });
-      } else if (type === 'forward') {
-        // 优先处理 children，以兼容标准 h 元素
-        const childrenToProcess: h[] = [...(el.children || [])];
-
-        // 健壮性处理：如果 children 为空，则尝试从 attrs.content 中解析原始数据
-        if (childrenToProcess.length === 0 && Array.isArray(el.attrs.content)) {
-          for (const node of el.attrs.content) {
-            if (!node) continue;
-
-            // 从 OneBot 的原始转发节点对象中提取真正的消息内容
-            // 根据 session 日志，内容在 node.message 中
-            const contentToNormalize = node.message;
-
-            if (contentToNormalize) {
-              try {
-                // 使用 h.normalize() 将消息段数组转换为标准 h 元素数组
-                childrenToProcess.push(...h.normalize(contentToNormalize));
-              } catch (error) {
-                logger.warn(`跳过无法解析的转发节点内容: ${error}`);
-                childrenToProcess.push(h.text('[内容解析失败]'));
-              }
-            }
-          }
-        }
-
-        // 只有在确实有内容时才进行下一步处理
-        if (childrenToProcess.length > 0) {
-            // 递归调用 transform，将 h 元素转换为数据库存储格式 StoredElement
-            const transformedChildren = await transform(childrenToProcess, logger);
-            if (transformedChildren.length > 0) {
-                 result.push({ type: 'forward', content: JSON.stringify(transformedChildren) });
-            }
-        }
+      } else if (type === 'forward' && el.children?.length) {
+        const transformedChildren = await transform(el.children);
+        result.push({ type: 'forward', content: JSON.stringify(transformedChildren) });
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
         let fileIdentifier = el.attrs.src as string;
         if (fileIdentifier.startsWith('http')) {
@@ -242,7 +212,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         }
         result.push({ type: type as any, file: fileIdentifier });
       } else if (el.children) {
-        result.push(...await transform(el.children, logger));
+        result.push(...await transform(el.children));
       }
     }
     return result;

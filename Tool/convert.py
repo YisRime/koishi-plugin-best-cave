@@ -79,6 +79,10 @@ def convert_and_rename_files(
         for element in item.get('elements', []):
             new_element = element.copy()
 
+            # 如果元素图片是img格式,改为image格式
+            if new_element.get('type') == 'img':
+                new_element['type'] = 'image'
+
             # [修改] 同时处理 image 和 video 类型
             if new_element.get('type') in ['image', 'video']:
                 original_filename = new_element.get('file')
@@ -111,6 +115,9 @@ def convert_and_rename_files(
 
             new_elements.append(new_element)
 
+        now = datetime.datetime.now()
+        formatted_time = now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
         # 构建输出的 JSON 对象
         new_item = {
             "elements": new_elements,
@@ -118,7 +125,7 @@ def convert_and_rename_files(
             "userId": user_id,
             "userName": user_name,
             "status": "active",
-            "time": datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+            "time": formatted_time
         }
         output_data.append(new_item)
 
