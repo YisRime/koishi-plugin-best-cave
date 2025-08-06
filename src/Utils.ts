@@ -203,7 +203,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         if (Array.isArray(el.attrs.content)) {
           for (const rawMessage of el.attrs.content) {
             if (rawMessage && rawMessage.message) {
-              childrenToProcess.push(...h.parse(rawMessage.message));
+              childrenToProcess.push(...h.normalize(rawMessage.message));
             }
           }
         }
