@@ -127,11 +127,10 @@ export function getScopeQuery(session: Session, config: Config, includeStatus = 
 /**
  * @description 获取下一个可用的回声洞 ID，采用“回收ID > 扫描空缺 > 最大ID+1”策略。
  * @param ctx Koishi 上下文。
- * @param query 查询范围条件。
  * @param reusableIds 可复用 ID 的内存缓存。
  * @returns 可用的新 ID。
  */
-export async function getNextCaveId(ctx: Context, query: object = {}, reusableIds: Set<number>): Promise<number> {
+export async function getNextCaveId(ctx: Context, reusableIds: Set<number>): Promise<number> {
   for (const id of reusableIds) {
     if (id > 0) {
       reusableIds.delete(id);
@@ -140,12 +139,12 @@ export async function getNextCaveId(ctx: Context, query: object = {}, reusableId
   }
   if (reusableIds.has(0)) {
     reusableIds.delete(0);
-    const [lastCave] = await ctx.database.get('cave', query, { sort: { id: 'desc' }, limit: 1 });
+    const [lastCave] = await ctx.database.get('cave', {}, { sort: { id: 'desc' }, limit: 1 });
     const newId = (lastCave?.id || 0) + 1;
     reusableIds.add(0);
     return newId;
   }
-  const allCaveIds = (await ctx.database.get('cave', query, { fields: ['id'] })).map(c => c.id);
+  const allCaveIds = (await ctx.database.get('cave', {}, { fields: ['id'] })).map(c => c.id);
   const existingIds = new Set(allCaveIds);
   let newId = 1;
   while (existingIds.has(newId)) newId++;

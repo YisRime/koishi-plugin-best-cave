@@ -173,7 +173,7 @@ export function apply(ctx: Context, config: Config) {
         }
         // if (debug) logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`);
         // if (debug) logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`);
-        const newId = await utils.getNextCaveId(ctx, utils.getScopeQuery(session, config, false), reusableIds);
+        const newId = await utils.getNextCaveId(ctx, reusableIds);
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
         // if (debug) logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
         if (finalElementsForDb.length === 0) return "无可添加内容";
