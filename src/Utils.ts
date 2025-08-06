@@ -210,8 +210,8 @@ export async function processMessageElements(sourceElements: h[], newId: number,
             const senderInfo = `${node.sender?.nickname || node.sender?.user_id}:`;
             allChildElements.push({ type: 'text', content: senderInfo });
 
-            if (node.message) {
-              const parsedMessage = h.parse(node.message);
+            if (node.raw_message) {
+              const parsedMessage = h.parse(node.raw_message);
               const transformedMessage = await transform(parsedMessage);
               allChildElements.push(...transformedMessage);
             }
