@@ -233,7 +233,6 @@ export async function handleFileUploads(
 
     const allExistingImageHashes = hashManager ? await ctx.database.get('cave_hash', { type: { $ne: 'simhash' } }) : [];
     const existingGlobalHashes = allExistingImageHashes.filter(h => h.type === 'phash_g');
-    const existingQuadrantHashes = allExistingImageHashes.filter(h => h.type.startsWith('phash_q'));
 
     for (const media of mediaToToSave) {
       const buffer = Buffer.from(await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 }));
@@ -249,17 +248,6 @@ export async function handleFileUploads(
             await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
             cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
             return;
-          }
-        }
-
-        const notifiedPartialCaves = new Set<number>();
-        for (const newSubHash of Object.values(quadrantHashes)) {
-          for (const existing of existingQuadrantHashes) {
-            if (notifiedPartialCaves.has(existing.cave)) continue;
-            if (newSubHash === existing.hash) {
-              await session.send(`图片与回声洞（${existing.cave}）局部相同`);
-              notifiedPartialCaves.add(existing.cave);
-            }
           }
         }
 
