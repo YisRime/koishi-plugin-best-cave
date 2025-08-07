@@ -153,27 +153,6 @@ export async function getNextCaveId(ctx: Context, reusableIds: Set<number>): Pro
 }
 
 /**
- * @description 检查用户是否处于指令冷却中。
- * @returns 若在冷却中则提示字符串，否则 null。
- */
-export function checkCooldown(session: Session, config: Config, lastUsed: Map<string, number>): string | null {
-  const adminChannelId = config.adminChannel?.split(':')[1];
-  if (adminChannelId && session.channelId === adminChannelId) return null;
-  if (config.coolDown <= 0 || !session.channelId) return null;
-  const lastTime = lastUsed.get(session.channelId) || 0;
-  const remainingTime = (lastTime + config.coolDown * 1000) - Date.now();
-  if (remainingTime > 0) return `指令冷却中，请在 ${Math.ceil(remainingTime / 1000)} 秒后重试`;
-  return null;
-}
-
-/**
- * @description 更新指定频道的指令使用时间戳。
- */
-export function updateCooldownTimestamp(session: Session, config: Config, lastUsed: Map<string, number>) {
-  if (config.coolDown > 0 && session.channelId) lastUsed.set(session.channelId, Date.now());
-}
-
-/**
  * @description 解析消息元素，分离出文本和待下载的媒体文件。
  * @param sourceElements 原始的 Koishi 消息元素数组。
  * @param newId 这条回声洞的新 ID。

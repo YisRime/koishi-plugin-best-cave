@@ -40,8 +40,8 @@
 | `cave.name [昵称]` | `enableName: true` | 设置你在回声洞中显示的昵称。若不提供昵称，则清除现有设置。 |
 | `cave.pend` | `enablePend: true` | **(仅限管理群组)** 列出所有待审核的回声洞ID。 |
 | `cave.pend <序号>` | `enablePend: true` | **(仅限管理群组)** 查看指定待审核内容的详情。 |
-| `cave.pend.Y [序号]` | `enablePend: true` | **(仅限管理群组)** 通过审核。若不提供序号，则通过所有待审核内容。 |
-| `cave.pend.N [序号]` | `enablePend: true` | **(仅限管理群组)** 拒绝审核。若不提供序号，则拒绝所有待审核内容。 |
+| `cave.pend.Y [...序号]` | `enablePend: true` | **(仅限管理群组)** 通过审核。若不提供序号，则通过所有待审核内容。 |
+| `cave.pend.N [...序号]` | `enablePend: true` | **(仅限管理群组)** 拒绝审核。若不提供序号，则拒绝所有待审核内容。 |
 | `cave.export` | `enableIO: true` | **(仅限管理群组)** 将所有`active`状态的回声洞导出到 `cave_export.json`。 |
 | `cave.import` | `enableIO: true` | **(仅限管理群组)** 从 `cave_import.json` 文件中导入数据。 |
 | `cave.hash` | `enableSimilarity: true` | **(仅限管理群组)** 校验所有历史数据，为缺失哈希的回声洞补全记录。 |
@@ -53,7 +53,6 @@
 
 | 配置项 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `coolDown` | `number` | `10` | `cave` 和 `cave.view` 指令的冷却时间（秒）。在管理群组中无冷却。 |
 | `perChannel` | `boolean` | `false` | 是否启用分群模式。`true` 表示各群的回声洞独立。 |
 | `enableName` | `boolean` | `false` | 是否启用自定义昵称功能 (`cave.name` 指令)。 |
 | `enableIO` | `boolean` | `false` | 是否启用数据导入/导出功能 (`cave.export` / `.import` 指令)。 |

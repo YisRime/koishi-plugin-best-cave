@@ -62,7 +62,6 @@ declare module 'koishi' {
 }
 
 export interface Config {
-  coolDown: number;
   perChannel: boolean;
   adminChannel: string;
   enableName: boolean;
@@ -84,7 +83,6 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    coolDown: Schema.number().default(10).description("冷却时间（秒）"),
     perChannel: Schema.boolean().default(false).description("启用分群模式"),
     enableName: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
@@ -121,7 +119,6 @@ export function apply(ctx: Context, config: Config) {
   }, { primary: 'id' });
 
   const fileManager = new FileManager(ctx.baseDir, config, logger);
-  const lastUsed = new Map<string, number>();
   const reusableIds = new Set<number>();
   const profileManager = config.enableName ? new NameManager(ctx) : null;
   const reviewManager = config.enablePend ? new PendManager(ctx, config, fileManager, logger, reusableIds) : null;
@@ -139,15 +136,12 @@ export function apply(ctx: Context, config: Config) {
       if (options.view) return session.execute(`cave.view ${options.view}`);
       if (options.delete) return session.execute(`cave.del ${options.delete}`);
       if (options.list) return session.execute('cave.list');
-      const cdMessage = utils.checkCooldown(session, config, lastUsed);
-      if (cdMessage) return cdMessage;
       try {
         const query = utils.getScopeQuery(session, config);
         const candidates = await ctx.database.get('cave', query, { fields: ['id'] });
         if (!candidates.length) return `当前${config.perChannel && session.channelId ? '本群' : ''}还没有任何回声洞`;
         const randomId = candidates[Math.floor(Math.random() * candidates.length)].id;
         const [randomCave] = await ctx.database.get('cave', { ...query, id: randomId });
-        utils.updateCooldownTimestamp(session, config, lastUsed);
         const messages = await utils.buildCaveMessage(randomCave, config, fileManager, logger, session.platform);
         for (const message of messages) if (message.length > 0) await session.send(h.normalize(message));
       } catch (error) {
@@ -224,12 +218,9 @@ export function apply(ctx: Context, config: Config) {
   cave.subcommand('.view <id:posint>', '查看指定回声洞')
     .action(async ({ session }, id) => {
       if (!id) return '请输入要查看的回声洞序号';
-      const cdMessage = utils.checkCooldown(session, config, lastUsed);
-      if (cdMessage) return cdMessage;
       try {
         const [targetCave] = await ctx.database.get('cave', { ...utils.getScopeQuery(session, config), id });
         if (!targetCave) return `回声洞（${id}）不存在`;
-        utils.updateCooldownTimestamp(session, config, lastUsed);
         const messages = await utils.buildCaveMessage(targetCave, config, fileManager, logger, session.platform);
         for (const message of messages) if (message.length > 0) await session.send(h.normalize(message));
       } catch (error) {

@@ -33,6 +33,7 @@ export class PendManager {
       return null;
     };
     const pend = cave.subcommand('.pend [id:posint]', '审核回声洞')
+      .usage('查询待审核的回声洞列表，或指定 ID 查看对应待审核的回声洞。')
       .action(async ({ session }, id) => {
         const adminError = requireAdmin(session);
         if (adminError) return adminError;
@@ -48,33 +49,34 @@ export class PendManager {
         if (!pendingCaves.length) return '当前没有需要审核的回声洞';
         return `当前共有 ${pendingCaves.length} 条待审核回声洞，序号为：\n${pendingCaves.map(c => c.id).join('|')}`;
       });
-    const createPendAction = (actionType: 'approve' | 'reject') => async ({ session }, id?: number) => {
+    const createPendAction = (actionType: 'approve' | 'reject') => async ({ session }, ...ids: number[]) => {
       const adminError = requireAdmin(session);
       if (adminError) return adminError;
+      if (ids.length === 0) return '请指定回声洞 ID';
       try {
         const targetStatus = actionType === 'approve' ? 'active' : 'delete';
         const actionText = actionType === 'approve' ? '通过' : '拒绝';
-        // 批量处理
-        if (!id) {
-          const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' });
-          if (!pendingCaves.length) return `当前没有需要${actionText}的回声洞`;
-          await this.ctx.database.upsert('cave', pendingCaves.map(c => ({ id: c.id, status: targetStatus })));
-          if (targetStatus === 'delete') cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
-          return `已批量${actionText} ${pendingCaves.length} 条回声洞`;
-        }
-        // 单个处理
-        const [cave] = await this.ctx.database.get('cave', { id, status: 'pending' });
-        if (!cave) return `回声洞（${id}）无需审核`;
-        await this.ctx.database.upsert('cave', [{ id, status: targetStatus }]);
+        const cavesToProcess = await this.ctx.database.get('cave', {
+          id: { $in: ids },
+          status: 'pending',
+        });
+        if (cavesToProcess.length === 0) return `回声洞（${ids.join('|')}）无需审核或不存在`;
+        const processedIds = cavesToProcess.map(cave => cave.id);
+        await this.ctx.database.upsert('cave', processedIds.map(id => ({ id, status: targetStatus })));
         if (targetStatus === 'delete') cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
-        return `回声洞（${id}）已${actionText}`;
+        return `已${actionText}回声洞（${processedIds.join('|')}）`;
       } catch (error) {
         this.logger.error(`审核操作失败:`, error);
         return `操作失败: ${error.message}`;
       }
     };
-    pend.subcommand('.Y [id:posint]', '通过审核').action(createPendAction('approve'));
-    pend.subcommand('.N [id:posint]', '拒绝审核').action(createPendAction('reject'));
+
+    pend.subcommand('.Y [...ids:posint]', '通过审核')
+      .usage('通过一个或多个指定 ID 的回声洞审核。')
+      .action(createPendAction('approve'));
+    pend.subcommand('.N [...ids:posint]', '拒绝审核')
+      .usage('拒绝一个或多个指定 ID 的回声洞审核。')
+      .action(createPendAction('reject'));
   }
 
   /**
