@@ -125,6 +125,19 @@ export function apply(ctx: Context, config: Config) {
   const hashManager = config.enableSimilarity ? new HashManager(ctx, config, logger, fileManager) : null;
   const dataManager = config.enableIO ? new DataManager(ctx, config, fileManager, logger) : null;
 
+  ctx.on('ready', async () => {
+    try {
+      const staleCaves = await ctx.database.get('cave', { status: 'preload' });
+      if (staleCaves.length > 0) {
+        const idsToMark = staleCaves.map(c => ({ id: c.id, status: 'delete' as const }));
+        await ctx.database.upsert('cave', idsToMark);
+        await utils.cleanupPendingDeletions(ctx, fileManager, logger, reusableIds);
+      }
+    } catch (error) {
+      logger.error('清理残留回声洞时发生错误:', error);
+    }
+  });
+
   const cave = ctx.command('cave', '回声洞')
     .option('add', '-a <content:text> 添加回声洞')
     .option('view', '-g <id:posint> 查看指定回声洞')
