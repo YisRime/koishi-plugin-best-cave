@@ -76,7 +76,8 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   const followUpMessages: (string | h)[][] = [];
   for (const el of caveHElements) {
     if (problematicTypes.includes(el.type) || (el.type === 'message' && el.attrs.forward)) {
-      initialMessageContent.push(h.text(placeholderMap['forward']));
+      const placeholderKey = (el.type === 'message' && el.attrs.forward) ? 'forward' : el.type;
+      initialMessageContent.push(h.text(placeholderMap[placeholderKey]));
       followUpMessages.push([el]);
     } else {
       initialMessageContent.push(el);
@@ -164,10 +165,45 @@ export async function getNextCaveId(ctx: Context, reusableIds: Set<number>): Pro
 export async function processMessageElements(sourceElements: h[], newId: number, session: Session, config: Config, logger: Logger): Promise<{ finalElementsForDb: StoredElement[], mediaToSave: { sourceUrl: string, fileName: string }[] }> {
   const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
   let mediaIndex = 0;
+  const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply' };
+  const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
   async function transform(elements: h[]): Promise<StoredElement[]> {
     const result: StoredElement[] = [];
-    const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply' };
-    const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
+    async function processForwardContent(segments: any[]): Promise<StoredElement[]> {
+      const innerResult: StoredElement[] = [];
+      for (const segment of segments) {
+        const sType = typeMap[segment.type];
+        if (!sType) continue;
+        if (sType === 'text' && segment.data?.text?.trim()) {
+          innerResult.push({ type: 'text', content: segment.data.text.trim() });
+        } else if (sType === 'at' && (segment.data?.id || segment.data?.qq)) {
+          innerResult.push({ type: 'at', content: (segment.data.id || segment.data.qq) as string });
+        } else if (sType === 'reply' && segment.data?.id) {
+          innerResult.push({ type: 'reply', content: segment.data.id as string });
+        } else if (['image', 'video', 'audio', 'file'].includes(sType) && (segment.data?.src || segment.data?.url)) {
+          let fileIdentifier = (segment.data.src || segment.data.url) as string;
+          if (fileIdentifier.startsWith('http')) {
+            const ext = path.extname(segment.data.file as string || '') || defaultExtMap[sType];
+            const currentMediaIndex = ++mediaIndex;
+            const fileName = `${newId}_${currentMediaIndex}_${session.channelId || session.guildId}_${session.userId}${ext}`;
+            mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
+            fileIdentifier = fileName;
+          }
+          innerResult.push({ type: sType as any, file: fileIdentifier });
+        } else if (sType === 'forward' && Array.isArray(segment.data?.content)) {
+          const nestedForwardNodes: ForwardNode[] = [];
+          for (const nestedNode of segment.data.content) {
+            if (!nestedNode.message || !Array.isArray(nestedNode.message)) continue;
+            const nestedContentElements = await processForwardContent(nestedNode.message);
+            if (nestedContentElements.length > 0) {
+              nestedForwardNodes.push({ userId: nestedNode.sender?.user_id, userName: nestedNode.sender?.nickname, elements: nestedContentElements });
+            }
+          }
+          if (nestedForwardNodes.length > 0) innerResult.push({ type: 'forward', content: nestedForwardNodes });
+        }
+      }
+      return innerResult;
+    }
     for (const el of elements) {
       const type = typeMap[el.type];
       if (!type) {
@@ -184,18 +220,10 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         const forwardNodes: ForwardNode[] = [];
         for (const node of el.attrs.content) {
           if (!node.message || !Array.isArray(node.message)) continue;
-          const userId = node.sender?.user_id;
-          const userName = node.sender?.nickname;
-          const elementsToProcess = node.message.map(segment => {
-            const { type, data } = segment;
-            const attrs = { ...data };
-            if (type === 'text' && typeof data.text !== 'undefined') { attrs.content = data.text; delete attrs.text; }
-            if (type === 'at' && typeof data.qq !== 'undefined') { attrs.id = data.qq; delete attrs.qq; }
-            if (['image', 'video', 'audio'].includes(type) && typeof data.url !== 'undefined') { attrs.src = data.url; delete attrs.url; }
-            return h(type, attrs);
-          });
-          const contentElements = await transform(elementsToProcess);
-          if (contentElements.length > 0) forwardNodes.push({ userId, userName, elements: contentElements });
+          const contentElements = await processForwardContent(node.message);
+          if (contentElements.length > 0) {
+            forwardNodes.push({ userId: node.sender?.user_id, userName: node.sender?.nickname, elements: contentElements });
+          }
         }
         if (forwardNodes.length > 0) result.push({ type: 'forward', content: forwardNodes });
       } else if (['image', 'video', 'audio', 'file'].includes(type) && el.attrs.src) {
