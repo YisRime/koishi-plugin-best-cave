@@ -52,15 +52,20 @@ export class PendManager {
     const createPendAction = (actionType: 'approve' | 'reject') => async ({ session }, ...ids: number[]) => {
       const adminError = requireAdmin(session);
       if (adminError) return adminError;
-      if (ids.length === 0) return '请指定回声洞 ID';
+      let idsToProcess = ids;
+      if (idsToProcess.length === 0) {
+        const pendingCaves = await this.ctx.database.get('cave', { status: 'pending' }, { fields: ['id'] });
+        if (!pendingCaves.length) return '当前没有需要审核的回声洞';
+        idsToProcess = pendingCaves.map(c => c.id);
+      }
       try {
         const targetStatus = actionType === 'approve' ? 'active' : 'delete';
         const actionText = actionType === 'approve' ? '通过' : '拒绝';
         const cavesToProcess = await this.ctx.database.get('cave', {
-          id: { $in: ids },
+          id: { $in: idsToProcess },
           status: 'pending',
         });
-        if (cavesToProcess.length === 0) return `回声洞（${ids.join('|')}）无需审核或不存在`;
+        if (cavesToProcess.length === 0) return `回声洞（${idsToProcess.join('|')}）无需审核或不存在`;
         const processedIds = cavesToProcess.map(cave => cave.id);
         await this.ctx.database.upsert('cave', processedIds.map(id => ({ id, status: targetStatus })));
         if (targetStatus === 'delete') cleanupPendingDeletions(this.ctx, this.fileManager, this.logger, this.reusableIds);
@@ -70,12 +75,11 @@ export class PendManager {
         return `操作失败: ${error.message}`;
       }
     };
-
     pend.subcommand('.Y [...ids:posint]', '通过审核')
-      .usage('通过一个或多个指定 ID 的回声洞审核。')
+      .usage('通过一个或多个指定 ID 的回声洞审核。若不指定 ID，则通过所有待审核的回声洞。')
       .action(createPendAction('approve'));
     pend.subcommand('.N [...ids:posint]', '拒绝审核')
-      .usage('拒绝一个或多个指定 ID 的回声洞审核。')
+      .usage('拒绝一个或多个指定 ID 的回声洞审核。若不指定 ID，则拒绝所有待审核的回声洞。')
       .action(createPendAction('reject'));
   }
 
