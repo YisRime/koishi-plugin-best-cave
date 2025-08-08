@@ -20,7 +20,7 @@ const mimeTypeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image
 export async function buildCaveMessage(cave: CaveObject, config: Config, fileManager: FileManager, logger: Logger, platform?: string, prefix?: string): Promise<(string | h)[][]> {
   // 递归地将 StoredElement 数组转换为 h() 元素数组
   async function transformToH(elements: StoredElement[]): Promise<h[]> {
-    return Promise.all(elements.map(async (el): Promise<h> => {
+    return Promise.all(elements.map(async (el): Promise<h | h[]> => {
       if (el.type === 'text') return h.text(el.content as string);
       if (el.type === 'at') return h('at', { id: el.content as string });
       if (el.type === 'reply') return h('reply', { id: el.content as string });
@@ -29,10 +29,22 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
           const forwardNodes: ForwardNode[] = Array.isArray(el.content) ? el.content : [];
           const messageNodes = await Promise.all(forwardNodes.map(async (node) => {
             const author = h('author', { id: node.userId, name: node.userName });
-            const content = await transformToH(node.elements);
-            return h('message', {}, [author, ...content]);
+            const contentElements = await transformToH(node.elements);
+            const unwrappedContent: h[] = [];
+            const nestedMessageNodes: h[] = [];
+            for (const contentEl of contentElements) {
+              if (contentEl.type === 'message' && contentEl.attrs.forward) {
+                nestedMessageNodes.push(...contentEl.children);
+              } else {
+                unwrappedContent.push(contentEl);
+              }
+            }
+            const resultNodes: h[] = [];
+            if (unwrappedContent.length > 0) resultNodes.push(h('message', {}, [author, ...unwrappedContent]));
+            resultNodes.push(...nestedMessageNodes);
+            return resultNodes;
           }));
-          return h('message', { forward: true }, messageNodes);
+          return h('message', { forward: true }, messageNodes.flat());
         } catch (error) {
           logger.warn(`解析回声洞（${cave.id}）合并转发内容失败:`, error);
           return h.text('[合并转发]');
@@ -54,7 +66,7 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
         }
       }
       return null;
-    })).then(hElements => hElements.filter(Boolean));
+    })).then(hElements => hElements.flat().filter(Boolean));
   }
   const caveHElements = await transformToH(cave.elements);
   const replacements = { id: cave.id.toString(), name: cave.userName };
@@ -89,7 +101,6 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
   if (footer) finalInitialMessage.push('\n' + footer);
   return [finalInitialMessage, ...followUpMessages].filter(msg => msg.length > 0);
 }
-
 
 /**
  * @description 清理数据库中标记为 'delete' 状态的回声洞及其关联文件和哈希。

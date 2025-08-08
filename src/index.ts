@@ -219,7 +219,7 @@ export function apply(ctx: Context, config: Config) {
           if (hashManager && textHashesToStore.length > 0) await ctx.database.upsert('cave_hash', textHashesToStore.map(h => ({ ...h, cave: newCave.id })));
           if (initialStatus === 'pending') reviewManager.sendForPend(newCave);
         }
-        return (initialStatus === 'pending' || (initialStatus === 'preload' && config.enablePend))
+        return needsReview
           ? `提交成功，序号为（${newCave.id}）`
           : `添加成功，序号为（${newCave.id}）`;
       } catch (error) {
