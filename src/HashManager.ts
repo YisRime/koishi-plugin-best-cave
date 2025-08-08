@@ -39,6 +39,7 @@ export class HashManager {
       type: 'string',
     }, {
       primary: ['cave', 'hash', 'type'],
+      indexes: ['type'],
     });
   }
 

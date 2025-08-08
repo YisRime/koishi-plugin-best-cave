@@ -1,4 +1,4 @@
-import { Context, Schema, Logger, h } from 'koishi'
+import { Context, Schema, Logger, h, $ } from 'koishi'
 import { FileManager } from './FileManager'
 import { NameManager } from './NameManager'
 import { DataManager } from './DataManager'
@@ -116,7 +116,10 @@ export function apply(ctx: Context, config: Config) {
     userName: 'string',
     status: 'string',
     time: 'timestamp',
-  }, { primary: 'id' });
+  }, {
+    primary: 'id',
+    indexes: ['status', 'channelId', 'userId'],
+  });
 
   const fileManager = new FileManager(ctx.baseDir, config, logger);
   const reusableIds = new Set<number>();
@@ -269,24 +272,23 @@ export function apply(ctx: Context, config: Config) {
         const adminChannelId = config.adminChannel?.split(':')[1];
         if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
         try {
-          const allCaves = await ctx.database.get('cave', { status: 'active' });
-          if (!allCaves.length) return '目前没有任何回声洞投稿。';
+          const aggregatedStats = await ctx.database.select('cave', { status: 'active' })
+            .groupBy(['userId', 'userName'], { count: row => $.count(row.id) }).execute();
+          if (!aggregatedStats.length) return '目前没有回声洞投稿';
           const userStats = new Map<string, { userName: string, count: number }>();
-          for (const cave of allCaves) {
-            const { userId, userName } = cave;
-            const stat = userStats.get(userId);
-            if (stat) {
-              stat.count++;
-              stat.userName = userName;
+          for (const stat of aggregatedStats) {
+            const existing = userStats.get(stat.userId);
+            if (existing) {
+              existing.count += stat.count;
+              const existingGroup = aggregatedStats.find(s => s.userId === stat.userId && s.userName === existing.userName);
+              if (stat.count > (existingGroup?.count || 0)) existing.userName = stat.userName;
             } else {
-              userStats.set(userId, { userName, count: 1 });
+              userStats.set(stat.userId, { userName: stat.userName, count: stat.count });
             }
           }
           const sortedStats = Array.from(userStats.values()).sort((a, b) => b.count - a.count);
           let report = '回声洞投稿数量排行：\n';
-          sortedStats.forEach((stat, index) => {
-            report += `${index + 1}. ${stat.userName}: ${stat.count} 条\n`;
-          });
+          sortedStats.forEach((stat, index) => { report += `${index + 1}. ${stat.userName}: ${stat.count} 条\n` });
           return report.trim();
         } catch (error) {
           logger.error('查询排行失败:', error);
