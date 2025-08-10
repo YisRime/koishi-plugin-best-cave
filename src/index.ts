@@ -170,12 +170,10 @@ export function apply(ctx: Context, config: Config) {
     .usage('添加一条回声洞。可直接发送内容，也可回复或引用消息。')
     .action(async ({ session }, content) => {
       try {
-        let sourceElements;
-        if (session.quote?.elements) {
-          sourceElements = session.quote.elements;
-        } else if (content?.trim()) {
-          sourceElements = h.parse(content);
-        } else {
+        let sourceElements = [];
+        if (content?.trim()) sourceElements.push(...h.parse(content));
+        if (session.quote?.elements) sourceElements.push(...session.quote.elements);
+        if (sourceElements.length === 0) {
           await session.send("请在一分钟内发送你要添加的内容");
           const reply = await session.prompt(60000);
           if (!reply) return "等待操作超时";
