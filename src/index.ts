@@ -170,20 +170,22 @@ export function apply(ctx: Context, config: Config) {
     .usage('添加一条回声洞。可直接发送内容，也可回复或引用消息。')
     .action(async ({ session }, content) => {
       try {
-        let sourceElements = [];
-        if (content?.trim()) sourceElements.push(...h.parse(content));
-        if (session.quote?.elements) sourceElements.push(...session.quote.elements);
-        if (sourceElements.length === 0) {
+        let sourceElements;
+        if (session.quote?.elements) {
+          sourceElements = session.quote.elements;
+        } else if (content?.trim()) {
+          sourceElements = h.parse(content);
+        } else {
           await session.send("请在一分钟内发送你要添加的内容");
           const reply = await session.prompt(60000);
           if (!reply) return "等待操作超时";
           sourceElements = h.parse(reply);
         }
-        // if (debug) logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`);
-        // if (debug) logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`);
+        // logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`); // Test
+        // logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`); // Test
         const newId = await utils.getNextCaveId(ctx, reusableIds);
         const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
-        // if (debug) logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`);
+        // logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`); // Test
         if (finalElementsForDb.length === 0) return "无可添加内容";
         const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
         if (hashManager) {
