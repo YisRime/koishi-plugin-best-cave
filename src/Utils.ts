@@ -69,11 +69,37 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
     })).then(hElements => hElements.flat().filter(Boolean));
   }
   const caveHElements = await transformToH(cave.elements);
-  const replacements = { id: cave.id.toString(), name: cave.userName };
+  const data = {
+    id: cave.id.toString(),
+    name: cave.userName,
+    user: cave.userId,
+    channel: cave.channelId,
+    time: cave.time.toLocaleString(),
+  };
+  const placeholderRegex = /\{([^}]+)\}/g;
+  const replacer = (match: string, content: string): string => {
+    const parts = content.split(':');
+    if (parts.length === 1) return data[content] ?? match;
+    if (parts.length === 4) {
+      const [maxStarsStr, key, prefixStr, suffixStr] = parts;
+      const originalValue = data[key];
+      if (!originalValue) return '';
+      const maxStars = parseInt(maxStarsStr, 10);
+      const prefixLength = parseInt(prefixStr, 10);
+      const suffixLength = parseInt(suffixStr, 10);
+      if (isNaN(maxStars) || isNaN(prefixLength) || isNaN(suffixLength)) return match;
+      if (prefixLength + suffixLength >= originalValue.length) return originalValue;
+      const prefix = originalValue.substring(0, prefixLength);
+      const suffix = originalValue.substring(originalValue.length - suffixLength);
+      const maskedLength = Math.min(maxStars, originalValue.length - prefixLength - suffixLength);
+      return `${prefix}${'*'.repeat(maskedLength)}${suffix}`;
+    }
+    return match;
+  };
   const [rawHeader, rawFooter] = config.caveFormat.split('|', 2);
-  let header = rawHeader ? rawHeader.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim() : '';
+  let header = rawHeader ? rawHeader.replace(placeholderRegex, replacer).trim() : '';
   if (prefix) header = `${prefix}${header}`;
-  const footer = rawFooter ? rawFooter.replace(/\{id\}|\{name\}/g, match => replacements[match.slice(1, -1)]).trim() : '';
+  const footer = rawFooter ? rawFooter.replace(placeholderRegex, replacer).trim() : '';
   const problematicTypes = ['video', 'audio', 'file', 'forward'];
   const placeholderMap = { video: '[视频]', audio: '[音频]', file: '[文件]', forward: '[合并转发]' };
   const containsProblematic = platform === 'onebot' && caveHElements.some(el => problematicTypes.includes(el.type) || (el.type === 'message' && el.attrs.forward));

@@ -62,7 +62,7 @@
 | `enableName` | `boolean` | `false` | 是否启用自定义昵称功能 (`cave.name` 指令)。 |
 | `enableIO` | `boolean` | `false` | 是否启用数据导入/导出功能 (`cave.export` / `.import` 指令)。 |
 | `adminChannel` | `string` | `'onebot:'` | **管理群组ID**。格式为 `平台名:群号`，如 `onebot:12345678`。管理指令仅在此群组生效。若配置无效，审核将自动通过。 |
-| `caveFormat` | `string` | `'回声洞 ——（{id}）\|—— {name}'` | 回声洞消息的显示格式。`{id}`是序号，`{name}`是昵称。`\|` 作为换行符，其前面的部分为页眉，后面的为页脚。 |
+| `caveFormat` | `string` | `'回声洞 ——（{id}）\|—— {name}'` | 回声洞消息的显示格式。`\|`作为分隔符，前面是页眉，后面是页脚。可用占位符：`{id}`, `{name}`, `{time}`, `{user}` 和 `{channel}` 。支持打码，语法为 `{最大星号数:占位符:保留前缀:保留后缀}`，例如 `{3:user:2:2}`。 |
 
 ### 复核配置 (审核与查重)
 

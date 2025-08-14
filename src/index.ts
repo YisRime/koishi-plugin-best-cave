@@ -87,7 +87,7 @@ export const Config: Schema<Config> = Schema.intersect([
     enableName: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
     adminChannel: Schema.string().default('onebot:').description("管理群组 ID"),
-    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本'),
+    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本，用“|”分隔。支持{id}|{name}|{time}|{user}|{channel}占位符，可使用{星号数:占位符:前缀:后缀}打码'),
   }).description("基础配置"),
   Schema.object({
     enablePend: Schema.boolean().default(false).description("启用审核"),
