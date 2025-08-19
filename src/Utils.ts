@@ -24,6 +24,7 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
       if (el.type === 'text') return h.text(el.content as string);
       if (el.type === 'at') return h('at', { id: el.content as string });
       if (el.type === 'reply') return h('reply', { id: el.content as string });
+      if (el.type === 'face') return h('face', { id: el.content as string });
       if (el.type === 'forward') {
         try {
           const forwardNodes: ForwardNode[] = Array.isArray(el.content) ? el.content : [];
@@ -77,24 +78,26 @@ export async function buildCaveMessage(cave: CaveObject, config: Config, fileMan
     time: cave.time.toLocaleString(),
   };
   const placeholderRegex = /\{([^}]+)\}/g;
-  const replacer = (match: string, content: string): string => {
-    const parts = content.split(':');
-    if (parts.length === 1) return data[content] ?? match;
-    if (parts.length === 4) {
-      const [maxStarsStr, key, prefixStr, suffixStr] = parts;
-      const originalValue = data[key];
-      if (!originalValue) return '';
-      const maxStars = parseInt(maxStarsStr, 10);
-      const prefixLength = parseInt(prefixStr, 10);
-      const suffixLength = parseInt(suffixStr, 10);
-      if (isNaN(maxStars) || isNaN(prefixLength) || isNaN(suffixLength)) return match;
-      if (prefixLength + suffixLength >= originalValue.length) return originalValue;
-      const prefix = originalValue.substring(0, prefixLength);
-      const suffix = originalValue.substring(originalValue.length - suffixLength);
-      const maskedLength = Math.min(maxStars, originalValue.length - prefixLength - suffixLength);
-      return `${prefix}${'*'.repeat(maskedLength)}${suffix}`;
-    }
-    return match;
+  const replacer = (match: string, rawContent: string): string => {
+    const isReviewMode = !!prefix;
+    const [normalPart, reviewPart] = rawContent.split('/', 2);
+    const contentToProcess = isReviewMode
+      ? (reviewPart !== undefined ? reviewPart : normalPart)
+      : normalPart;
+    if (!contentToProcess?.trim()) return '';
+    const useMask = contentToProcess.startsWith('*');
+    const key = (useMask ? contentToProcess.substring(1) : contentToProcess).trim();
+    if (!key) return '';
+    const originalValue = data[key];
+    if (originalValue === undefined || originalValue === null) return match;
+    const valueStr = String(originalValue);
+    if (!useMask) return valueStr;
+    const len = valueStr.length;
+    if (len <= 5) return valueStr;
+    let keep = 0;
+    if (len <= 7) keep = 2;
+    else keep = 3;
+    return `${valueStr.substring(0, keep)}***${valueStr.substring(len - keep)}`;
   };
   const [rawHeader, rawFooter] = config.caveFormat.split('|', 2);
   let header = rawHeader ? rawHeader.replace(placeholderRegex, replacer).trim() : '';
@@ -202,7 +205,7 @@ export async function getNextCaveId(ctx: Context, reusableIds: Set<number>): Pro
 export async function processMessageElements(sourceElements: h[], newId: number, session: Session, config: Config, logger: Logger): Promise<{ finalElementsForDb: StoredElement[], mediaToSave: { sourceUrl: string, fileName: string }[] }> {
   const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
   let mediaIndex = 0;
-  const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply' };
+  const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply', 'face': 'face' };
   const defaultExtMap = { 'image': '.jpg', 'video': '.mp4', 'audio': '.mp3', 'file': '.dat' };
   async function transform(elements: h[]): Promise<StoredElement[]> {
     const result: StoredElement[] = [];
@@ -273,6 +276,8 @@ export async function processMessageElements(sourceElements: h[], newId: number,
           fileIdentifier = fileName;
         }
         result.push({ type: type as any, file: fileIdentifier });
+      } else if (type === 'face' && el.attrs.id) {
+        result.push({ type: 'face', content: el.attrs.id as string });
       }
     }
     return result;
@@ -303,15 +308,14 @@ export async function handleFileUploads(
   try {
     const downloadedMedia: { fileName: string, buffer: Buffer }[] = [];
     const imageHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
-    const allExistingImageHashes = hashManager ? await ctx.database.get('cave_hash', { type: { $ne: 'simhash' } }) : [];
-    const existingGlobalHashes = allExistingImageHashes.filter(h => h.type === 'phash_g');
+    const allExistingImageHashes = hashManager ? await ctx.database.get('cave_hash', { type: 'phash' }) : [];
     for (const media of mediaToToSave) {
       const buffer = Buffer.from(await ctx.http.get(media.sourceUrl, { responseType: 'arraybuffer', timeout: 30000 }));
       downloadedMedia.push({ fileName: media.fileName, buffer });
       if (hashManager && ['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(media.fileName).toLowerCase())) {
-        const { globalHash, quadrantHashes } = await hashManager.generateAllImageHashes(buffer);
-        for (const existing of existingGlobalHashes) {
-          const similarity = hashManager.calculateSimilarity(globalHash, existing.hash);
+        const imageHash = await hashManager.generatePHash(buffer, 256);
+        for (const existing of allExistingImageHashes) {
+          const similarity = hashManager.calculateSimilarity(imageHash, existing.hash);
           if (similarity >= config.imageThreshold) {
             await session.send(`图片与回声洞（${existing.cave}）的相似度（${similarity.toFixed(2)}%）超过阈值`);
             await ctx.database.upsert('cave', [{ id: cave.id, status: 'delete' }]);
@@ -319,11 +323,7 @@ export async function handleFileUploads(
             return;
           }
         }
-        imageHashesToStore.push({ hash: globalHash, type: 'phash_g' });
-        imageHashesToStore.push({ hash: quadrantHashes.q1, type: 'phash_q1' });
-        imageHashesToStore.push({ hash: quadrantHashes.q2, type: 'phash_q2' });
-        imageHashesToStore.push({ hash: quadrantHashes.q3, type: 'phash_q3' });
-        imageHashesToStore.push({ hash: quadrantHashes.q4, type: 'phash_q4' });
+        imageHashesToStore.push({ hash: imageHash, type: 'phash' });
       }
     }
     await Promise.all(downloadedMedia.map(item => fileManager.saveFile(item.fileName, item.buffer)));

@@ -10,7 +10,7 @@ import * as crypto from 'crypto';
 export interface CaveHashObject {
   cave: number;
   hash: string;
-  type: 'simhash' | 'phash_g' | 'phash_q1' | 'phash_q2' | 'phash_q3' | 'phash_q4';
+  type: 'simhash' | 'phash';
 }
 
 /**
@@ -53,7 +53,7 @@ export class HashManager {
       if (session.channelId !== adminChannelId) return '此指令仅限在管理群组中使用';
     };
 
-    cave.subcommand('.hash', '校验回声洞')
+    cave.subcommand('.hash', '校验回声洞', { hidden: true , authority: 3 })
       .usage('校验缺失哈希的回声洞，补全哈希记录。')
       .action(async (argv) => {
         const checkResult = adminCheck(argv);
@@ -67,7 +67,7 @@ export class HashManager {
         }
       });
 
-    cave.subcommand('.check', '检查相似度')
+    cave.subcommand('.check', '检查相似度', { hidden: true })
       .usage('检查所有回声洞，找出相似度过高的内容。')
       .option('textThreshold', '-t <threshold:number> 文本相似度阈值 (%)')
       .option('imageThreshold', '-i <threshold:number> 图片相似度阈值 (%)')
@@ -149,12 +149,8 @@ export class HashManager {
     for (const el of cave.elements.filter(el => el.type === 'image' && el.file)) {
       try {
         const imageBuffer = await this.fileManager.readFile(el.file);
-        const { globalHash, quadrantHashes } = await this.generateAllImageHashes(imageBuffer);
-        addUniqueHash({ cave: cave.id, hash: globalHash, type: 'phash_g' });
-        addUniqueHash({ cave: cave.id, hash: quadrantHashes.q1, type: 'phash_q1' });
-        addUniqueHash({ cave: cave.id, hash: quadrantHashes.q2, type: 'phash_q2' });
-        addUniqueHash({ cave: cave.id, hash: quadrantHashes.q3, type: 'phash_q3' });
-        addUniqueHash({ cave: cave.id, hash: quadrantHashes.q4, type: 'phash_q4' });
+        const imageHash = await this.generatePHash(imageBuffer, 256);
+        addUniqueHash({ cave: cave.id, hash: imageHash, type: 'phash' });
       } catch (e) {
         this.logger.warn(`无法为回声洞（${cave.id}）的图片（${el.file}）生成哈希:`, e);
       }
@@ -173,24 +169,17 @@ export class HashManager {
     const allHashes = await this.ctx.database.get('cave_hash', {});
     const allCaveIds = [...new Set(allHashes.map(h => h.cave))];
     const textHashes = new Map<number, string>();
-    const globalHashes = new Map<number, string>();
-    const quadrantHashesByCave = new Map<number, Set<string>>();
-    const partialHashToCaves = new Map<string, Set<number>>();
+    const imageHashes = new Map<number, string>();
     for (const hash of allHashes) {
       if (hash.type === 'simhash') {
         textHashes.set(hash.cave, hash.hash);
-      } else if (hash.type === 'phash_g') {
-        globalHashes.set(hash.cave, hash.hash);
-      } else if (hash.type.startsWith('phash_q')) {
-        if (!quadrantHashesByCave.has(hash.cave)) quadrantHashesByCave.set(hash.cave, new Set<string>());
-        quadrantHashesByCave.get(hash.cave)!.add(hash.hash);
-        if (!partialHashToCaves.has(hash.hash)) partialHashToCaves.set(hash.hash, new Set<number>());
-        partialHashToCaves.get(hash.hash)!.add(hash.cave);
+      } else if (hash.type === 'phash') {
+        imageHashes.set(hash.cave, hash.hash);
       }
     }
     const similarPairs = {
       text: new Set<string>(),
-      global: new Set<string>(),
+      image: new Set<string>(),
     };
     for (let i = 0; i < allCaveIds.length; i++) {
       for (let j = i + 1; j < allCaveIds.length; j++) {
@@ -204,73 +193,21 @@ export class HashManager {
           const similarity = this.calculateSimilarity(text1, text2);
           if (similarity >= textThreshold) similarPairs.text.add(`${pair} = ${similarity.toFixed(2)}%`);
         }
-        // 比较图片全局哈希 (pHash_g)
-        const global1 = globalHashes.get(id1);
-        const global2 = globalHashes.get(id2);
-        if (global1 && global2) {
-          const similarity = this.calculateSimilarity(global1, global2);
-          if (similarity >= imageThreshold) similarPairs.global.add(`${pair} = ${similarity.toFixed(2)}%`);
+        // 比较图片哈希 (pHash)
+        const image1 = imageHashes.get(id1);
+        const image2 = imageHashes.get(id2);
+        if (image1 && image2) {
+          const similarity = this.calculateSimilarity(image1, image2);
+          if (similarity >= imageThreshold) similarPairs.image.add(`${pair} = ${similarity.toFixed(2)}%`);
         }
       }
     }
-    const allPartialCaveIds = Array.from(quadrantHashesByCave.keys());
-    const parent = new Map<number, number>();
-    const find = (i: number): number => {
-      if (parent.get(i) === i) return i;
-      parent.set(i, find(parent.get(i)!));
-      return parent.get(i)!;
-    };
-    const union = (i: number, j: number) => {
-      const rootI = find(i);
-      const rootJ = find(j);
-      if (rootI !== rootJ) parent.set(rootI, rootJ);
-    };
-    allPartialCaveIds.forEach(id => parent.set(id, id));
-    for (const caveIds of partialHashToCaves.values()) {
-        if (caveIds.size <= 1) continue;
-        const ids = Array.from(caveIds);
-        for (let i = 1; i < ids.length; i++) union(ids[0], ids[i]);
-    }
-    const components = new Map<number, Set<number>>();
-    for (const id of allPartialCaveIds) {
-        const root = find(id);
-        if (!components.has(root)) components.set(root, new Set());
-        components.get(root)!.add(id);
-    }
-    const partialGroups: string[] = [];
-    for (const component of components.values()) if (component.size > 1) partialGroups.push(Array.from(component).sort((a, b) => a - b).join(' & '));
-    const totalFindings = similarPairs.text.size + similarPairs.global.size + partialGroups.length;
+    const totalFindings = similarPairs.text.size + similarPairs.image.size;
     if (totalFindings === 0) return '未发现高相似度的内容';
     let report = `已发现 ${totalFindings} 组高相似度的内容:`;
     if (similarPairs.text.size > 0) report += '\n文本内容相似:\n' + [...similarPairs.text].join('\n');
-    if (similarPairs.global.size > 0) report += '\n图片整体相似:\n' + [...similarPairs.global].join('\n');
-    if (partialGroups.length > 0) report += '\n图片局部相同:\n' + partialGroups.join('\n');
+    if (similarPairs.image.size > 0) report += '\n图片内容相似:\n' + [...similarPairs.image].join('\n');
     return report.trim();
-  }
-
-
-  /**
-   * @description 为单个图片Buffer生成全局pHash和四个象限的局部pHash。
-   * @param imageBuffer - 图片的Buffer数据。
-   * @returns 包含全局哈希和四象限哈希的对象。
-   */
-  public async generateAllImageHashes(imageBuffer: Buffer) {
-    const globalHash = await this._generatePHash(imageBuffer, 256);
-    const { width, height } = await sharp(imageBuffer).metadata();
-    const w2 = Math.floor(width / 2), h2 = Math.floor(height / 2);
-    const regions = [
-      { left: 0, top: 0, width: w2, height: h2 },
-      { left: w2, top: 0, width: width - w2, height: h2 },
-      { left: 0, top: h2, width: w2, height: height - h2 },
-      { left: w2, top: h2, width: width - w2, height: height - h2 },
-    ];
-    const [q1, q2, q3, q4] = await Promise.all(
-        regions.map(region => {
-          if (region.width < 16 || region.height < 16) return this._generatePHash(imageBuffer, 64);
-          return sharp(imageBuffer).extract(region).toBuffer().then(b => this._generatePHash(b, 64));
-        })
-    );
-    return { globalHash, quadrantHashes: { q1, q2, q3, q4 } };
   }
 
   /**
@@ -307,7 +244,7 @@ export class HashManager {
    * @param size - 期望的哈希位数 (必须是完全平方数, 如 64 或 256)。
    * @returns 十六进制pHash字符串。
    */
-  private async _generatePHash(imageBuffer: Buffer, size: number): Promise<string> {
+  public async generatePHash(imageBuffer: Buffer, size: number): Promise<string> {
     const dctSize = 32;
     const hashGridSize = Math.sqrt(size);
     if (!Number.isInteger(hashGridSize)) throw new Error('哈希位数必须是完全平方数');

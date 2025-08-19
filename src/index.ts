@@ -36,7 +36,7 @@ export interface ForwardNode {
  * @description 存储在数据库中的单个消息元素。
  */
 export interface StoredElement {
-  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'at' | 'forward' | 'reply';
+  type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'at' | 'forward' | 'reply' | 'face';
   content?: string | ForwardNode[];
   file?: string;
 }
@@ -87,7 +87,7 @@ export const Config: Schema<Config> = Schema.intersect([
     enableName: Schema.boolean().default(false).description("启用自定义昵称"),
     enableIO: Schema.boolean().default(false).description("启用导入导出"),
     adminChannel: Schema.string().default('onebot:').description("管理群组 ID"),
-    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本，用“|”分隔（占位符配置参见 README）'),
+    caveFormat: Schema.string().default('回声洞 ——（{id}）|—— {name}').description('自定义文本（参见 README）'),
   }).description("基础配置"),
   Schema.object({
     enablePend: Schema.boolean().default(false).description("启用审核"),

@@ -1,6 +1,7 @@
 import { Context, Logger } from 'koishi';
 import { FileManager } from './FileManager';
 import { CaveObject, Config } from './index';
+import { audio } from '@satorijs/element/jsx-runtime';
 
 /**
  * @description 用于数据导入/导出的可移植回声洞对象格式。
@@ -42,10 +43,10 @@ export class DataManager {
       }
     };
 
-    cave.subcommand('.export', '导出回声洞数据')
+    cave.subcommand('.export', '导出回声洞数据', { hidden: true , authority: 4 })
       .usage('将所有回声洞数据导出到 cave_export.json 中。')
       .action(requireAdmin(() => this.exportData()));
-    cave.subcommand('.import', '导入回声洞数据')
+    cave.subcommand('.import', '导入回声洞数据', { hidden: true , authority: 4 })
       .usage('从 cave_import.json 中导入回声洞数据。')
       .action(requireAdmin(() => this.importData()));
   }

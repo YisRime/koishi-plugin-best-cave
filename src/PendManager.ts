@@ -32,7 +32,7 @@ export class PendManager {
       if (session.channelId !== this.config.adminChannel?.split(':')[1]) return '此指令仅限在管理群组中使用';
       return null;
     };
-    const pend = cave.subcommand('.pend [id:posint]', '审核回声洞')
+    const pend = cave.subcommand('.pend [id:posint]', '审核回声洞', { hidden: true })
       .usage('查询待审核的回声洞列表，或指定 ID 查看对应待审核的回声洞。')
       .action(async ({ session }, id) => {
         const adminError = requireAdmin(session);
