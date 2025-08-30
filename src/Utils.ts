@@ -272,7 +272,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         if (fileIdentifier.startsWith('http')) {
           const ext = path.extname(el.attrs.file as string || '') || defaultExtMap[type];
           const currentMediaIndex = ++mediaIndex;
-          const fileName = `${newId}_${creationTime.getTime()}_${currentMediaIndex}_${session.userId}${ext}`;
+          const fileName = `${newId}-${currentMediaIndex}_${session.channelId}-${session.userId}_${creationTime.getTime()}${ext}`;
           mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
           fileIdentifier = fileName;
         }
