@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-best-cave",
   "description": "功能强大、高度可定制的回声洞。支持丰富的媒体类型、内容查重、人工审核、用户昵称、数据迁移以及本地/S3 双重文件存储后端。",
-  "version": "2.6.4",
+  "version": "2.6.5",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],
@@ -29,6 +29,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.800.0",
-    "koishi-plugin-shikoi": "0.0.1"
+    "koishi-plugin-shikoi": "0.0.2"
   }
 }

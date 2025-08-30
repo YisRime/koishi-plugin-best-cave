@@ -184,7 +184,8 @@ export function apply(ctx: Context, config: Config) {
         // logger.info(`消息内容: \n${JSON.stringify(sourceElements, null, 2)}`); // Test
         // logger.info(`完整会话: \n${JSON.stringify(session, null, 2)}`); // Test
         const newId = await utils.getNextCaveId(ctx, reusableIds);
-        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger);
+        const creationTime = new Date();
+        const { finalElementsForDb, mediaToSave } = await utils.processMessageElements(sourceElements, newId, session, config, logger, creationTime);
         // logger.info(`数据库元素: \n${JSON.stringify(finalElementsForDb, null, 2)}`); // Test
         if (finalElementsForDb.length === 0) return "无可添加内容";
         const textHashesToStore: Omit<CaveHashObject, 'cave'>[] = [];
@@ -214,7 +215,7 @@ export function apply(ctx: Context, config: Config) {
           userId: session.userId,
           userName,
           status: initialStatus,
-          time: new Date(),
+          time: creationTime,
         });
         if (hasMedia) {
           utils.handleFileUploads(ctx, config, fileManager, logger, reviewManager, newCave, mediaToSave, reusableIds, session, hashManager, textHashesToStore);

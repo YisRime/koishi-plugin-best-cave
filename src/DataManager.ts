@@ -1,12 +1,6 @@
 import { Context, Logger } from 'koishi';
 import { FileManager } from './FileManager';
 import { CaveObject, Config } from './index';
-import { audio } from '@satorijs/element/jsx-runtime';
-
-/**
- * @description 用于数据导入/导出的可移植回声洞对象格式。
- */
-type PortableCaveObject = Omit<CaveObject, 'id'>;
 
 /**
  * @class DataManager
@@ -58,9 +52,8 @@ export class DataManager {
   public async exportData(): Promise<string> {
     const fileName = 'cave_export.json';
     const cavesToExport = await this.ctx.database.get('cave', { status: 'active' });
-    const portableCaves: PortableCaveObject[] = cavesToExport.map(({ id, ...rest }) => rest);
-    await this.fileManager.saveFile(fileName, Buffer.from(JSON.stringify(portableCaves, null, 2)));
-    return `成功导出 ${portableCaves.length} 条数据`;
+    await this.fileManager.saveFile(fileName, Buffer.from(JSON.stringify(cavesToExport, null, 2)));
+    return `成功导出 ${cavesToExport.length} 条数据`;
   }
 
   /**
@@ -69,7 +62,7 @@ export class DataManager {
    */
   public async importData(): Promise<string> {
     const fileName = 'cave_import.json';
-    let importedCaves: PortableCaveObject[];
+    let importedCaves: CaveObject[];
     try {
       const fileContent = await this.fileManager.readFile(fileName);
       importedCaves = JSON.parse(fileContent.toString('utf-8'));
@@ -77,12 +70,33 @@ export class DataManager {
     } catch (error) {
       throw new Error(`读取导入文件失败: ${error.message}`);
     }
-    const [lastCave] = await this.ctx.database.get('cave', {}, { sort: { id: 'desc' }, limit: 1 });
-    let startId = (lastCave?.id || 0) + 1;
-    const newCavesToInsert: CaveObject[] = importedCaves.map((cave, index) => ({
-      ...cave, id: startId + index, status: 'active',
-    }));
-    await this.ctx.database.upsert('cave', newCavesToInsert);
-    return `成功导入 ${newCavesToInsert.length} 条数据`;
+    const allDbCaves = await this.ctx.database.get('cave', {}, { fields: ['id'] });
+    const existingIds = new Set(allDbCaves.map(c => c.id));
+    let maxId = allDbCaves.length > 0 ? Math.max(...allDbCaves.map(c => c.id)) : 0;
+    const nonConflictingCaves: CaveObject[] = [];
+    const conflictingCaves: CaveObject[] = [];
+    let invalidCount = 0;
+    for (const importedCave of importedCaves) {
+      if (typeof importedCave.id !== 'number' || !Array.isArray(importedCave.elements)) {
+        this.logger.warn(`回声洞（${importedCave.id}）无效: ${JSON.stringify(importedCave)}`);
+        invalidCount++;
+        continue;
+      }
+      if (existingIds.has(importedCave.id)) {
+        conflictingCaves.push(importedCave);
+      } else {
+        nonConflictingCaves.push({ ...importedCave, status: 'active' });
+        existingIds.add(importedCave.id);
+        maxId = Math.max(maxId, importedCave.id);
+      }
+    }
+    const newCavesFromConflicts: CaveObject[] = conflictingCaves.map(cave => {
+      maxId++;
+      this.logger.info(`回声洞（${cave.id}）已转移至（${maxId}）`);
+      return { ...cave, maxId, status: 'active' };
+    });
+    const finalCavesToUpsert = [...nonConflictingCaves, ...newCavesFromConflicts];
+    if (finalCavesToUpsert.length > 0) await this.ctx.database.upsert('cave', finalCavesToUpsert);
+    return `成功导入 ${finalCavesToUpsert.length} 条数据`;
   }
 }

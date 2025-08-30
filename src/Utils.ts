@@ -200,9 +200,10 @@ export async function getNextCaveId(ctx: Context, reusableIds: Set<number>): Pro
  * @param session 触发操作的会话。
  * @param config 插件配置。
  * @param logger 日志实例。
+ * @param creationTime 统一的创建时间戳，用于生成文件名。
  * @returns 包含数据库元素和待保存媒体列表的对象。
  */
-export async function processMessageElements(sourceElements: h[], newId: number, session: Session, config: Config, logger: Logger): Promise<{ finalElementsForDb: StoredElement[], mediaToSave: { sourceUrl: string, fileName: string }[] }> {
+export async function processMessageElements(sourceElements: h[], newId: number, session: Session, config: Config, logger: Logger, creationTime: Date): Promise<{ finalElementsForDb: StoredElement[], mediaToSave: { sourceUrl: string, fileName: string }[] }> {
   const mediaToSave: { sourceUrl: string, fileName: string }[] = [];
   let mediaIndex = 0;
   const typeMap = { 'img': 'image', 'image': 'image', 'video': 'video', 'audio': 'audio', 'file': 'file', 'text': 'text', 'at': 'at', 'forward': 'forward', 'reply': 'reply', 'face': 'face' };
@@ -225,7 +226,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
           if (fileIdentifier.startsWith('http')) {
             const ext = path.extname(segment.data.file as string || '') || defaultExtMap[sType];
             const currentMediaIndex = ++mediaIndex;
-            const fileName = `${newId}_${currentMediaIndex}_${session.channelId || session.guildId}_${session.userId}${ext}`;
+            const fileName = `${newId}_${currentMediaIndex}_${session.channelId || session.guildId}_${session.userId}_${creationTime.getTime()}${ext}`;
             mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
             fileIdentifier = fileName;
           }
@@ -271,7 +272,7 @@ export async function processMessageElements(sourceElements: h[], newId: number,
         if (fileIdentifier.startsWith('http')) {
           const ext = path.extname(el.attrs.file as string || '') || defaultExtMap[type];
           const currentMediaIndex = ++mediaIndex;
-          const fileName = `${newId}_${currentMediaIndex}_${session.channelId || session.guildId}_${session.userId}${ext}`;
+          const fileName = `${newId}_${creationTime.getTime()}_${currentMediaIndex}_${session.userId}${ext}`;
           mediaToSave.push({ sourceUrl: fileIdentifier, fileName });
           fileIdentifier = fileName;
         }
