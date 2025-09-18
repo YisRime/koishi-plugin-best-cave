@@ -38,30 +38,30 @@ export class DataManager {
     };
 
     cave.subcommand('.export', '导出回声洞数据', { hidden: true , authority: 4 })
-      .usage('将所有回声洞数据导出到 cave_export.json 中。')
+      .usage('将所有回声洞数据导出到 cave.json 中。')
       .action(requireAdmin(() => this.exportData()));
     cave.subcommand('.import', '导入回声洞数据', { hidden: true , authority: 4 })
-      .usage('从 cave_import.json 中导入回声洞数据。')
+      .usage('从 cave.json 中导入回声洞数据。')
       .action(requireAdmin(() => this.importData()));
   }
 
   /**
-   * @description 导出所有 'active' 状态的回声洞数据到 `cave_export.json`。
+   * @description 导出所有 'active' 状态的回声洞数据到 `cave.json`。
    * @returns 描述导出结果的消息字符串。
    */
   public async exportData(): Promise<string> {
-    const fileName = 'cave_export.json';
+    const fileName = 'cave.json';
     const cavesToExport = await this.ctx.database.get('cave', { status: 'active' });
     await this.fileManager.saveFile(fileName, Buffer.from(JSON.stringify(cavesToExport, null, 2)));
     return `成功导出 ${cavesToExport.length} 条数据`;
   }
 
   /**
-   * @description 从 `cave_import.json` 文件导入回声洞数据。
+   * @description 从 `cave.json` 文件导入回声洞数据。
    * @returns 描述导入结果的消息字符串。
    */
   public async importData(): Promise<string> {
-    const fileName = 'cave_import.json';
+    const fileName = 'cave.json';
     let importedCaves: CaveObject[];
     try {
       const fileContent = await this.fileManager.readFile(fileName);
